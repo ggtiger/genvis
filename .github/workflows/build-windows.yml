@@ -1,0 +1,227 @@
+name: Build Windows
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      upload_artifacts:
+        description: 'Upload build artifacts'
+        required: false
+        default: 'true'
+        type: boolean
+
+  # Tag 推送触发 (v1.0.0, v2.1.3 等)
+  push:
+    tags:
+      - 'v*'
+
+  # Pull Request 触发 (仅测试构建，不上传)
+  pull_request:
+    branches:
+      - main
+
+# 取消同一分支/标签的重复运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 权限配置（创建 Release 必须）
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build for Windows x64
+    runs-on: windows-latest
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整历史，便于版本标记
+
+      # 2. 设置 Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # 3. 安装依赖
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. 配置环境变量
+      - name: Setup environment variables
+        shell: pwsh
+        run: |
+          # 创建 .env 文件（生产构建所需的最小配置）
+          @"
+          NODE_ENV=production
+          PROJECTS_DIR=./data/projects
+          PORT=3000
+          WEB_PORT=3000
+          PREVIEW_PORT_START=3100
+          PREVIEW_PORT_END=3999
+          DATABASE_URL="file:./data/prod.db"
+          "@ | Out-File -FilePath .env -Encoding utf8
+
+          # 如果需要 API Key（从 GitHub Secrets 读取）
+          # Add-Content -Path .env -Value "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"
+
+      # 5. 类型检查
+      - name: TypeScript type check
+        run: npm run type-check
+
+      # 5.5 Build Git Runtime
+      - name: Cache Git Runtime
+        id: cache-git-runtime
+        uses: actions/cache@v4
+        with:
+          path: git-runtime/win32-x64
+          key: git-runtime-win32-x64-2.47.1-trimmed-${{ hashFiles('scripts/build-git-runtime.ps1', 'scripts/trim-git-runtime.ps1') }}
+
+      - name: Build Git Runtime
+        if: steps.cache-git-runtime.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\scripts\build-git-runtime.ps1
+
+      - name: Trim Git Runtime
+        if: steps.cache-git-runtime.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\scripts\trim-git-runtime.ps1 -SkipBackup
+
+      - name: Verify Git Runtime
+        shell: pwsh
+        run: |
+          $gitExe = "git-runtime\win32-x64\cmd\git.exe"
+          $bashExe = "git-runtime\win32-x64\bin\bash.exe"
+          $licenseFile = "git-runtime\win32-x64\THIRD_PARTY_LICENSES\git-for-windows-LICENSE.txt"
+
+          if (-not (Test-Path $gitExe)) {
+            Write-Error "git.exe not found"
+            exit 1
+          }
+          if (-not (Test-Path $bashExe)) {
+            Write-Error "bash.exe not found"
+            exit 1
+          }
+          if (-not (Test-Path $licenseFile)) {
+            Write-Error "License file not found"
+            exit 1
+          }
+
+          $version = & $gitExe --version
+          Write-Host "✅ Git Runtime verification passed: $version"
+
+      # 5.1 调试：检查脚本文件状态
+      - name: Debug - Inspect script file
+        shell: pwsh
+        run: |
+          Write-Host "=== Script File Info ===" -ForegroundColor Cyan
+          Get-FileHash .\tools\build-windows.ps1
+          Write-Host "Line count: $((Get-Content .\tools\build-windows.ps1).Count)"
+          Write-Host ""
+          Write-Host "=== First 5 lines ===" -ForegroundColor Cyan
+          Get-Content .\tools\build-windows.ps1 -TotalCount 5
+          Write-Host ""
+          Write-Host "=== Lines 350-370 (suspicious area) ===" -ForegroundColor Cyan
+          $lines = Get-Content .\tools\build-windows.ps1
+          350..370 | ForEach-Object { "{0,4}: {1}" -f $_, $lines[$_-1] }
+
+      # 5.2 Parser 预检：找出真正的第一个语法错误
+      - name: Parse build-windows.ps1 (PowerShell parser)
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD\tools\build-windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            Write-Host "Found $($errors.Count) parse error(s):" -ForegroundColor Red
+            $errors | ForEach-Object {
+              Write-Host "ParseError: $($_.Message) at $($_.Extent.StartLineNumber):$($_.Extent.StartColumnNumber)" -ForegroundColor Yellow
+              Write-Host ">> $($_.Extent.Text)" -ForegroundColor Gray
+              Write-Host ""
+            }
+            exit 1
+          }
+          Write-Host "Parse OK - No syntax errors found" -ForegroundColor Green
+
+      # 6. 执行 Windows 打包脚本
+      - name: Build Windows package
+        shell: pwsh
+        run: .\tools\build-windows.ps1 -SkipTypeCheck
+
+      # 7. 检查构建产物
+      - name: List build artifacts
+        shell: pwsh
+        run: |
+          Write-Host "=== Build artifacts ===" -ForegroundColor Cyan
+          Get-ChildItem dist -Filter *.exe | ForEach-Object {
+            $sizeMB = [math]::Round($_.Length / 1MB, 2)
+            Write-Host "  - $($_.Name) (${sizeMB} MB)" -ForegroundColor White
+          }
+
+      # 8. 上传构建产物
+      - name: Upload artifacts
+        # 仅在以下情况上传：
+        # - 手动触发且勾选了上传
+        # - Tag 推送
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_artifacts == 'true') ||
+          startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: genvis-windows-x64-${{ github.ref_name }}
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/*.yaml
+          retention-days: 3
+          compression-level: 6
+
+      # 9. 发布到 GitHub Release (仅 Tag 推送)
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 10. 打印构建总结
+      - name: Build summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summary = @"
+          ### 🎉 Build Summary
+
+          - **Platform**: Windows x64
+          - **Node Version**: $(node -v)
+          - **Trigger**: ${{ github.event_name }}
+          - **Ref**: ${{ github.ref }}
+
+          "@
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
+
+          if (Test-Path "dist") {
+            $artifacts = @"
+          #### 📦 Build Artifacts
+          ``````
+          "@
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $artifacts
+
+            Get-ChildItem dist -Filter *.exe | ForEach-Object {
+              $sizeMB = [math]::Round($_.Length / 1MB, 2)
+              $line = "$($_.Name) - ${sizeMB} MB"
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $line
+            }
+
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+          }

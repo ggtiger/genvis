@@ -1,0 +1,181 @@
+name: Build macOS ARM64
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      upload_artifacts:
+        description: 'Upload build artifacts'
+        required: false
+        default: 'true'
+        type: boolean
+
+  # Tag 推送触发 (v1.0.0, v2.1.3 等)
+  push:
+    tags:
+      - 'v*'
+
+  # Pull Request 触发 (仅测试构建，不上传)
+  pull_request:
+    branches:
+      - main
+
+# 取消同一分支/标签的重复运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 权限配置（创建 Release 必须）
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build for macOS ARM64
+    runs-on: macos-latest  # Apple Silicon (M1/M2/M3)
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整历史，便于版本标记
+
+      # 2. 设置 Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # 3. 安装依赖
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. 配置环境变量
+      - name: Setup environment variables
+        run: |
+          # 创建 .env 文件（生产构建所需的最小配置）
+          cat > .env << 'EOF'
+          NODE_ENV=production
+          PROJECTS_DIR=./data/projects
+          PORT=3000
+          WEB_PORT=3000
+          PREVIEW_PORT_START=3100
+          PREVIEW_PORT_END=3999
+          DATABASE_URL="file:./data/prod.db"
+          EOF
+
+          # 如果需要 API Key（从 GitHub Secrets 读取）
+          # echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
+
+      # 5. 类型检查
+      - name: TypeScript type check
+        run: npm run type-check
+
+      # 6. 导入签名证书
+      - name: Import signing certificate
+        if: ${{ env.MACOS_CERTIFICATE != '' }}
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          # 创建临时 keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # 导入证书
+          echo "$MACOS_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 -P "$MACOS_CERTIFICATE_PWD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          rm -f $RUNNER_TEMP/certificate.p12
+          echo "Certificate imported successfully"
+
+      # 7. 执行 macOS 打包脚本 (ARM64)
+      - name: Build macOS ARM64 package
+        run: |
+          # 赋予执行权限
+          chmod +x ./tools/build-mac2.sh
+          # 使用打包脚本，跳过类型检查（已在前面执行）
+          ./tools/build-mac2.sh --arch arm64 --skip-type-check
+        env:
+          # 签名配置（通过 Secrets 配置）
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          # 公证配置
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      # 8. 检查构建产物
+      - name: List build artifacts
+        run: |
+          echo "=== Build artifacts ==="
+          ls -lh dist/
+          echo ""
+          echo "=== DMG files ==="
+          find dist -name "*.dmg" -exec ls -lh {} \;
+          echo ""
+          echo "=== ZIP files ==="
+          find dist -name "*.zip" -exec ls -lh {} \;
+
+      # 9. 上传构建产物
+      - name: Upload artifacts
+        # 仅在以下情况上传：
+        # - 手动触发且勾选了上传
+        # - Tag 推送
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_artifacts == 'true') ||
+          startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: genvis-macos-arm64-${{ github.ref_name }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+          retention-days: 3
+          compression-level: 0  # DMG/ZIP 已压缩，无需二次压缩
+
+      # 10. 发布到 GitHub Release (仅 Tag 推送)
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 11. 打印构建总结
+      - name: Build summary
+        if: always()
+        run: |
+          {
+            echo "### 🎉 Build Summary"
+            echo ""
+            echo "- **Platform**: macOS ARM64 (Apple Silicon)"
+            echo "- **Node Version**: $(node -v)"
+            echo "- **Trigger**: ${{ github.event_name }}"
+            echo "- **Ref**: ${{ github.ref }}"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -d "dist" ]; then
+            {
+              echo "#### 📦 Build Artifacts"
+              echo '```'
+              find dist -type f \( -name "*.dmg" -o -name "*.zip" \) -exec ls -lh {} \;
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
