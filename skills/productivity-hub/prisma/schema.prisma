@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 日程表
+model Schedule {
+  id              String    @id @default(cuid())
+  title           String
+  description     String?
+  startTime       DateTime
+  endTime         DateTime?
+  allDay          Boolean   @default(false)
+  reminderMinutes Int?
+  reminderSent    Boolean   @default(false)
+  repeatType      String?   // none | daily | weekly | monthly
+  color           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// 笔记表
+model Note {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  tags      String?  // JSON array
+  isPinned  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 定时任务表
+model ScheduledTask {
+  id              String    @id @default(cuid())
+  name            String
+  message         String    // 发送给秘书的消息内容
+  cronExpression  String?   // cron 表达式，用于重复任务
+  triggerTime     DateTime? // 一次性任务的触发时间
+  repeatType      String    @default("once") // once | daily | weekly | monthly | cron
+  enabled         Boolean   @default(true)
+  notifyIM        Boolean   @default(false) // 是否同时发送到已连接的 IM（钉钉/飞书等）
+  lastTriggeredAt DateTime?
+  nextTriggerAt   DateTime?
+  triggerCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  logs            TaskExecutionLog[]
+}
+
+// 定时任务执行日志
+model TaskExecutionLog {
+  id              String    @id @default(cuid())
+  taskId          String
+  task            ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  status          String    @default("pending") // pending | success | failed
+  secretaryReply  String?   // 秘书的回复内容
+  imPushResult    String?   // IM 推送结果（JSON）
+  error           String?   // 错误信息
+  durationMs      Int?      // 执行耗时
+  createdAt       DateTime  @default(now())
+}
+
+// 待办表
+model Todo {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  priority    String    @default("medium") // low | medium | high
+  status      String    @default("pending") // pending | in_progress | completed
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}

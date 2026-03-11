@@ -1,0 +1,9 @@
+{
+  "displayName": "Good抖音短视频转文字Skills",
+  "description": "提取短视频音频并转为文字，支持时间戳定位，兼容抖音/TikTok等平台",
+  "category": "视频工具",
+  "tags": ["短视频", "ASR", "语音识别", "抖音", "TikTok"],
+  "version": "1.0.0",
+  "author": "古德白",
+  "projectType": "python-fastapi"
+}

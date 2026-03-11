@@ -1,0 +1,38 @@
+[
+  {
+    "keyword": "做一个万能短视频下载工具",
+    "skillId": "gooddowner"
+  },
+  {
+    "keyword": "做一个coze工作流一键变网站的工具",
+    "skillId": "coze2app_py"
+  },
+  {
+    "keyword": "做一个飞书文档一键变网站的工具",
+    "skillId": "feishu2app"
+  },
+  {
+    "keyword": "做一个微信群智能助手",
+    "skillId": "goodqunbot"
+  },
+  {
+    "keyword": "参考死了么帮我写一个写了么App",
+    "sourceProjectId": "project-1768194851541-q7ck8llnm08",
+    "deployedUrl": "http://hello.suishouai.cn"
+  },
+    {
+    "keyword": "帮写一个Good抖音短视频转文字Skills",
+    "sourceProjectId": "p-qlzja8lk",
+    "deployedUrl": "http://hello.suishouai.cn"
+  },
+  {
+    "keyword": "Mac帮古德白写一个万能短视频下载工具3",
+    "sourceProjectId": "project-1768194851541-q7ck8llnm08",
+    "deployedUrl": "http://hello.suishouai.cn"
+  },
+  {
+    "keyword": "Mac帮古德白写一个coze工作流一键变网站的工具2",
+    "sourceProjectId": "p-vwp60p0q",
+    "deployedUrl": "http://coze23331.suishouai.cn"
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "displayName": "个人效率助手",
+  "description": "集日程提醒、笔记记录、待办管理于一体的个人效率工具，支持自然语言查询",
+  "category": "效率工具",
+  "tags": ["日程", "笔记", "待办", "提醒", "GTD"],
+  "version": "1.0.0",
+  "author": "Genvis",
+  "preview": "preview.png",
+  "projectType": "nextjs",
+  "prebuild": true
+}

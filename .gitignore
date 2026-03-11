@@ -1,0 +1,115 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+**/node_modules
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+**/.next/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+.env
+**/.env
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# ============================================================
+# Genvis Specific
+# ============================================================
+
+# SQLite database
+prisma/*.db
+prisma/*.db-journal
+prisma/*.db-wal
+
+# Generated projects
+data/
+/data/projects/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# All dot-folders
+.*/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Python cache
+__pycache__/
+*.pyc
+
+# YoYo AI version control directory
+.yoyo/
+
+# Electron build artifacts (too large for GitHub)
+dist/
+release/
+.claude/
+public/uploads/
+
+# Python Runtime (too large for git)
+python-runtime/
+
+# Node.js Runtime (too large for git)
+node-runtime/
+
+# Git Runtime (too large for git)
+git-runtime/
+
+# Windows special device files and debug outputs
+nul
+run*.txt
+
+tests2/
+.playwright-mcp/
+
+# ============================================================
+# macOS Code Signing (NEVER commit certificates)
+# ============================================================
+*.p12
+*.cer
+*.certSigningRequest
+**/cert-base64.txt
+tools/macos-signing/credentials/*
+!tools/macos-signing/credentials/.gitkeep
+**/goodable-sign-work/
+

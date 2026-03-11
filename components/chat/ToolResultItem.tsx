@@ -1,0 +1,254 @@
+import React, { useId, useState, useEffect, useMemo } from 'react';
+import { motion } from 'framer-motion';
+import { toRelativePath } from '@/lib/utils/path';
+import { FileCode } from 'lucide-react';
+
+interface ToolResultItemProps {
+  action: 'Edited' | 'Created' | 'Read' | 'Deleted' | 'Generated' | 'Searched' | 'Executed';
+  filePath: string;
+  content?: string;
+  isExpanded?: boolean;
+  onToggle?: (nextExpanded: boolean) => void;
+}
+
+// Get language from file path for syntax highlighting
+const getLanguageFromPath = (filePath: string): string => {
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  const langMap: Record<string, string> = {
+    'ts': 'typescript',
+    'tsx': 'typescript',
+    'js': 'javascript',
+    'jsx': 'javascript',
+    'py': 'python',
+    'css': 'css',
+    'scss': 'scss',
+    'html': 'html',
+    'json': 'json',
+    'md': 'markdown',
+    'yaml': 'yaml',
+    'yml': 'yaml',
+    'sh': 'bash',
+    'bash': 'bash',
+    'sql': 'sql',
+    'xml': 'xml',
+    'java': 'java',
+    'go': 'go',
+    'rs': 'rust',
+    'rb': 'ruby',
+    'php': 'php',
+    'c': 'c',
+    'cpp': 'cpp',
+    'h': 'c',
+    'hpp': 'cpp',
+  };
+  return langMap[ext] || 'plaintext';
+};
+
+// HTML escape helper
+const escapeHtml = (text: string): string => {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+};
+
+const ToolResultItem: React.FC<ToolResultItemProps> = ({
+  action,
+  filePath,
+  content,
+  isExpanded: controlledExpanded,
+  onToggle,
+}) => {
+  const [uncontrolledExpanded, setUncontrolledExpanded] = useState(true); // Default to expanded
+  const contentId = useId();
+  const isControlled = typeof controlledExpanded === 'boolean';
+  const isExpanded = isControlled ? controlledExpanded : uncontrolledExpanded;
+  const hasContent = Boolean(content);
+
+  // Dynamically load highlight.js
+  const [hljs, setHljs] = useState<any>(null);
+
+  useEffect(() => {
+    if (hasContent && !hljs) {
+      import('highlight.js/lib/common').then(mod => {
+        setHljs(mod.default);
+      });
+    }
+  }, [hasContent, hljs]);
+
+  const handleToggle = () => {
+    if (!hasContent) return;
+    const nextExpanded = !isExpanded;
+    if (!isControlled) {
+      setUncontrolledExpanded(nextExpanded);
+    }
+    onToggle?.(nextExpanded);
+  };
+
+  // Convert to relative path for display
+  const displayPath = toRelativePath(filePath);
+
+  // Check if this is code content (Read/Write/Edit actions with file extension)
+  const isCodeContent = (action === 'Read' || action === 'Created' || action === 'Edited') &&
+                        filePath &&
+                        /\.[a-z0-9]+$/i.test(filePath);
+
+  // Highlight code with syntax highlighting
+  const highlightedCode = useMemo(() => {
+    if (!content || !hljs || !isCodeContent) {
+      return escapeHtml(content || '');
+    }
+
+    const language = getLanguageFromPath(filePath);
+    try {
+      if (language === 'plaintext') {
+        return escapeHtml(content);
+      }
+      return hljs.highlight(content, { language }).value;
+    } catch {
+      try {
+        return hljs.highlightAuto(content).value;
+      } catch {
+        return escapeHtml(content);
+      }
+    }
+  }, [hljs, content, filePath, isCodeContent]);
+  
+  const getIcon = () => {
+    switch (action) {
+      case 'Edited':
+      case 'Created':
+        return (
+          <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 -960 960 960" className="shrink-0 h-4 w-4 text-muted-foreground" fill="currentColor">
+            <path d="M560-110v-81q0-5.57 2-10.78 2-5.22 7-10.22l211.61-210.77q9.11-9.12 20.25-13.18Q812-440 823-440q12 0 23 4.5t20 13.5l37 37q9 9 13 20t4 22-4.5 22.5-13.58 20.62L692-89q-5 5-10.22 7-5.21 2-10.78 2h-81q-12.75 0-21.37-8.63Q560-97.25 560-110m300-233-37-37zM620-140h38l121-122-37-37-122 121zM220-80q-24 0-42-18t-18-42v-680q0-24 18-42t42-18h315q12.44 0 23.72 5T578-862l204 204q8 8 13 19.28t5 23.72v71q0 12.75-8.68 21.37-8.67 8.63-21.5 8.63-12.82 0-21.32-8.63-8.5-8.62-8.5-21.37v-56H550q-12.75 0-21.37-8.63Q520-617.25 520-630v-190H220v680h250q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32Q482.75-80 470-80zm0-60v-680zm541-141-19-18 37 37z"></path>
+          </svg>
+        );
+      case 'Read':
+        return (
+          <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 -960 960 960" className="shrink-0 h-4 w-4 text-muted-foreground" fill="currentColor">
+            <path d="M320-240h320v-80H320v80zm0-160h320v-80H320v80zM240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h320l240 240v480q0 33-23.5 56.5T720-80H240zm280-520v-200H240v640h480v-440H520zM240-800v200-200 640-640z"></path>
+          </svg>
+        );
+      case 'Deleted':
+        return (
+          <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 -960 960 960" className="shrink-0 h-4 w-4 text-muted-foreground" fill="currentColor">
+            <path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280zm400-600H280v520h400v-520zM360-280h80v-360h-80v360zm160 0h80v-360h-80v360zM280-720v520-520z"></path>
+          </svg>
+        );
+      case 'Generated':
+        return (
+          <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 -960 960 960" className="shrink-0 h-4 w-4 text-muted-foreground" fill="currentColor">
+            <path d="m424-296 282-282-56-56-226 226-114-114-56 56 170 170Zm56 216q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80z"></path>
+          </svg>
+        );
+      case 'Searched':
+        return (
+          <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 -960 960 960" className="shrink-0 h-4 w-4 text-muted-foreground" fill="currentColor">
+            <path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640v400q0 33-23.5 56.5T800-160H160zm0-80h640v-400H447l-80-80H160v480zm0 0v-480 480z"></path>
+          </svg>
+        );
+      case 'Executed':
+      default:
+        return (
+          <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 -960 960 960" className="shrink-0 h-4 w-4 text-muted-foreground" fill="currentColor">
+            <path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160zm0-80h640v-400H160v400zm140-40-56-56 103-104-104-104 57-56 160 160-160 160zm180 0v-80h240v80H480z"></path>
+          </svg>
+        );
+    }
+  };
+
+  return (
+    <div className="mb-2">
+      <div
+        className="flex h-6 items-center gap-1.5 whitespace-nowrap text-base font-medium md:text-sm cursor-pointer group"
+        onClick={handleToggle}
+        role={hasContent ? 'button' : undefined}
+        aria-expanded={hasContent ? Boolean(isExpanded) : undefined}
+        aria-controls={hasContent ? contentId : undefined}
+        tabIndex={hasContent ? 0 : -1}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            handleToggle();
+          }
+        }}
+      >
+        <div className="mb-px mr-1 flex shrink-0 items-center">
+          {getIcon()}
+        </div>
+        <span className="flex-shrink-0 font-normal text-slate-600 dark:text-slate-400 ">
+          {action}
+        </span>
+        <span
+          className="relative w-fit max-w-xs truncate rounded-md bg-white/15 dark:bg-white/5 px-2 py-0 text-start text-xs font-normal text-slate-600 dark:text-slate-400 transition-colors hover:bg-gray-200 "
+          title={displayPath}
+        >
+          <span className="truncate">
+            {displayPath}
+          </span>
+        </span>
+        {hasContent && (
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`ml-1 text-slate-400 dark:text-slate-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+          >
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        )}
+      </div>
+
+      {hasContent && (
+        <motion.div
+          key={contentId}
+          initial={false}
+          animate={isExpanded ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ overflow: 'hidden', pointerEvents: isExpanded ? 'auto' : 'none' }}
+          aria-hidden={!isExpanded}
+          id={contentId}
+        >
+          {isCodeContent ? (
+            // Code content with syntax highlighting and title bar
+            <div className="mt-2 ml-6 bg-white rounded-lg border border-white/15 dark:border-white/[0.06] overflow-hidden">
+              {/* Title bar with file path */}
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 dark:bg-white/5 border-b border-white/15 dark:border-white/[0.06]">
+                <FileCode size={12} className="text-slate-500 dark:text-slate-400 flex-shrink-0" />
+                <span className="text-xs text-slate-600 dark:text-slate-400 font-mono truncate" title={displayPath}>
+                  {displayPath}
+                </span>
+              </div>
+              {/* Code content with syntax highlighting */}
+              <div className="p-3 bg-white/5 dark:bg-white/5 max-h-[400px] overflow-y-auto">
+                <pre className="text-xs text-gray-800 font-mono whitespace-pre-wrap break-words">
+                  <code
+                    className="hljs"
+                    dangerouslySetInnerHTML={{ __html: highlightedCode }}
+                  />
+                </pre>
+              </div>
+            </div>
+          ) : (
+            // Non-code content (plain text)
+            <div className="mt-2 ml-6 p-3 bg-white/5 dark:bg-white/5 rounded-lg">
+              <pre className="text-xs text-slate-700 dark:text-slate-300 font-mono whitespace-pre-wrap break-words">
+                {content}
+              </pre>
+            </div>
+          )}
+        </motion.div>
+      )}
+    </div>
+  );
+};
+
+export default ToolResultItem;

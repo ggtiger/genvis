@@ -1,0 +1,25 @@
+appId: com.demo.electron-sdk-bs
+productName: ElectronSDKDemo-BS
+directories:
+  output: dist-bs
+
+# Override main entry to use main-bs.js
+extraMetadata:
+  main: main-bs.js
+
+files:
+  - main-bs.js
+  - next-app/.next/**/*
+  - next-app/node_modules/**/*
+  - next-app/package.json
+  - next-app/public/**/*
+
+asar: true
+asarUnpack:
+  - next-app/node_modules/@anthropic-ai/claude-agent-sdk/**/*
+
+mac:
+  target: dir
+
+win:
+  target: dir

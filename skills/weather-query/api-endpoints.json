@@ -1,0 +1,43 @@
+{
+  "skillName": "weather-query",
+  "displayName": "天气查询",
+  "description": "自动获取当前所在地的实时天气信息，包括温度、天气状况等",
+  "auth": {
+    "authType": "api-key",
+    "envVars": ["QWEATHER_API_KEY"]
+  },
+  "endpoints": [
+    {
+      "path": "/api/weather/current",
+      "method": "GET",
+      "description": "获取当前天气（自动根据IP定位城市）",
+      "parameters": [],
+      "responseDescription": "返回当前天气信息",
+      "responseFields": [
+        {"name": "city", "type": "string", "description": "City name"},
+        {"name": "temperature", "type": "number", "description": "Current temperature (Celsius)"},
+        {"name": "condition", "type": "string", "description": "Weather condition (Sunny, Cloudy, Rainy, etc.)"},
+        {"name": "humidity", "type": "number", "description": "Relative humidity (%)"},
+        {"name": "windDirection", "type": "string", "description": "Wind direction"},
+        {"name": "windSpeed", "type": "number", "description": "Wind speed (km/h)"}
+      ]
+    },
+    {
+      "path": "/api/weather/by-city",
+      "method": "GET",
+      "description": "Query weather by city name",
+      "parameters": [
+        {"name": "city", "type": "string", "required": true, "description": "City name (e.g., Beijing, Shanghai)"}
+      ],
+      "responseDescription": "Returns weather information for specified city",
+      "responseFields": [
+        {"name": "city", "type": "string", "description": "City name"},
+        {"name": "temperature", "type": "number", "description": "Current temperature (Celsius)"},
+        {"name": "condition", "type": "string", "description": "Weather condition"},
+        {"name": "humidity", "type": "number", "description": "Relative humidity (%)"},
+        {"name": "windDirection", "type": "string", "description": "Wind direction"},
+        {"name": "windSpeed", "type": "number", "description": "Wind speed (km/h)"}
+      ]
+    }
+  ]
+}

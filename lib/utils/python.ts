@@ -1,0 +1,310 @@
+/**
+ * Python utility functions for FastAPI project support
+ */
+
+import { spawn } from 'child_process';
+import path from 'path';
+import fs from 'fs/promises';
+import { getBuiltinPythonPath } from '@/lib/config/paths';
+
+/**
+ * 验证 venv 中的 Python 是否真正可用（不只是文件存在）
+ * 检查 symlink 是否断裂、dylib 是否可加载等
+ */
+export async function isVenvUsable(projectPath: string): Promise<boolean> {
+  const pythonBin = getVenvPythonPath(projectPath);
+  if (!(await fileExists(pythonBin))) return false;
+
+  // Actually try to run the venv python to verify it works
+  return new Promise((resolve) => {
+    const child = spawn(pythonBin, ['-c', 'print("ok")'], {
+      cwd: projectPath,
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+
+    let stdout = '';
+    child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.on('error', () => resolve(false));
+    child.on('close', (code) => {
+      resolve(code === 0 && stdout.trim() === 'ok');
+    });
+  });
+}
+
+/**
+ * 执行命令并返回输出
+ */
+async function execCommand(command: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, ['--version'], {
+      shell: true,
+      stdio: 'pipe',
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', reject);
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout + stderr);
+      } else {
+        reject(new Error(`Command failed with code ${code}`));
+      }
+    });
+  });
+}
+
+/**
+ * 检查文件是否存在
+ */
+async function fileExists(targetPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(targetPath);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 检查目录是否存在
+ */
+async function directoryExists(targetPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(targetPath);
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 检测系统Python并返回可执行文件路径
+ * 要求版本 >= 3.11
+ */
+export async function detectSystemPython(): Promise<string | null> {
+  const candidates = ['python3', 'python'];
+
+  for (const cmd of candidates) {
+    try {
+      const result = await execCommand(cmd);
+      const match = result.match(/Python (\d+)\.(\d+)/);
+      if (match) {
+        const major = parseInt(match[1], 10);
+        const minor = parseInt(match[2], 10);
+        if (major === 3 && minor >= 11) {
+          return cmd;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 检测Python（优先内置，降级到系统）
+ * 返回Python可执行文件的完整路径
+ */
+export async function detectPython(): Promise<string | null> {
+  try {
+    // 1. 优先使用内置Python
+    const builtinPython = getBuiltinPythonPath();
+    if (builtinPython) {
+      console.log('[Python] Using builtin Python:', builtinPython);
+      return builtinPython;
+    }
+
+    // 2. 降级到系统Python
+    console.log('[Python] Builtin Python not found, trying system Python...');
+    const systemPython = await detectSystemPython();
+
+    if (systemPython) {
+      console.log('[Python] Using system Python:', systemPython);
+      return systemPython;
+    }
+
+    console.error('[Python] No Python found (neither builtin nor system)');
+    return null;
+  } catch (error) {
+    console.error('[Python] Error during Python detection:', error);
+    return null;
+  }
+}
+
+/**
+ * 校验Python版本
+ */
+export async function checkPythonVersion(
+  pythonCmd: string
+): Promise<{ valid: boolean; version: string; message: string }> {
+  try {
+    const result = await execCommand(pythonCmd);
+    const match = result.match(/Python (\d+)\.(\d+)\.(\d+)/);
+
+    if (!match) {
+      return {
+        valid: false,
+        version: 'unknown',
+        message: '无法解析Python版本号',
+      };
+    }
+
+    const [, major, minor, patch] = match;
+    const version = `${major}.${minor}.${patch}`;
+    const majorNum = parseInt(major, 10);
+    const minorNum = parseInt(minor, 10);
+
+    if (majorNum === 3 && minorNum >= 11) {
+      return {
+        valid: true,
+        version,
+        message: `Python版本符合要求: ${version}`,
+      };
+    }
+
+    return {
+      valid: false,
+      version,
+      message: `Python版本过低: ${version}，要求 >= 3.11`,
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      version: 'unknown',
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * 创建虚拟环境
+ */
+export async function createVirtualEnv(
+  projectPath: string,
+  pythonCmd: string
+): Promise<void> {
+  const venvPath = path.join(projectPath, '.venv');
+
+  // 检查是否已存在且可用
+  if (await directoryExists(venvPath)) {
+    if (await isVenvUsable(projectPath)) {
+      return; // 已存在且可用
+    }
+    // venv 存在但不可用（symlink 断裂、dylib 缺失等），删除后重建
+    console.log(`[Python] Existing venv at ${venvPath} is broken, removing and recreating...`);
+    await fs.rm(venvPath, { recursive: true, force: true });
+  }
+
+  // 创建虚拟环境
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(pythonCmd, ['-m', 'venv', '.venv'], {
+      cwd: projectPath,
+      shell: process.platform === 'win32',
+      stdio: 'pipe',
+    });
+
+    let stderr = '';
+
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', reject);
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(
+          new Error(
+            `Virtual environment creation failed with code ${code}${stderr ? `: ${stderr}` : ''}`
+          )
+        );
+      }
+    });
+  });
+}
+
+/**
+ * 获取虚拟环境Python路径
+ */
+export function getVenvPythonPath(projectPath: string): string {
+  const isWindows = process.platform === 'win32';
+  const binDir = isWindows ? 'Scripts' : 'bin';
+  const pythonBin = isWindows ? 'python.exe' : 'python';
+  return path.join(projectPath, '.venv', binDir, pythonBin);
+}
+
+/**
+ * 获取虚拟环境pip路径
+ */
+export function getVenvPipPath(projectPath: string): string {
+  const isWindows = process.platform === 'win32';
+  const binDir = isWindows ? 'Scripts' : 'bin';
+  const pipBin = isWindows ? 'pip.exe' : 'pip';
+  return path.join(projectPath, '.venv', binDir, pipBin);
+}
+
+/**
+ * 确保Python项目的.gitignore包含必要条目
+ */
+export async function ensurePythonGitignore(projectPath: string): Promise<void> {
+  const gitignorePath = path.join(projectPath, '.gitignore');
+
+  const requiredEntries = [
+    '.venv/',
+    '__pycache__/',
+    '*.pyc',
+    '*.pyo',
+    '*.pyd',
+    '.Python',
+    '*.db',
+    '*.sqlite',
+    '*.sqlite3',
+    '.env',
+    '.env.local',
+  ];
+
+  let content = '';
+
+  try {
+    content = await fs.readFile(gitignorePath, 'utf8');
+  } catch {
+    // 文件不存在，创建新的
+    content = '# Python\n';
+  }
+
+  let modified = false;
+  const lines = content.split('\n');
+
+  for (const entry of requiredEntries) {
+    // 检查是否已存在（忽略注释和空行）
+    const exists = lines.some((line) => {
+      const trimmed = line.trim();
+      return trimmed === entry || trimmed === entry.replace('/', '');
+    });
+
+    if (!exists) {
+      lines.push(entry);
+      modified = true;
+    }
+  }
+
+  if (modified) {
+    await fs.writeFile(gitignorePath, lines.join('\n'), 'utf8');
+  }
+}

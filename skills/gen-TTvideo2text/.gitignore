@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Downloads
+downloads/*
+!downloads/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# TikTokDownloader runtime
+Data/
+cache/
+
+# TikTokDownloader library (local dependency, not versioned)
+TikTokDownloader/
+
+# Keep example settings template if needed
+!TikTokDownloader/settings.json.example

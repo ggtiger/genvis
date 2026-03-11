@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PPTX Skill Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #fff;
+      color: #000;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 24px;
+      border-bottom: 1px solid #000;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    .panel {
+      padding: 24px;
+      overflow: auto;
+    }
+
+    .panel-left {
+      width: 40%;
+      border-right: 1px solid #000;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-right {
+      width: 60%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-title {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    textarea {
+      flex: 1;
+      width: 100%;
+      border: 1px solid #000;
+      padding: 16px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      outline: none;
+      min-height: 200px;
+    }
+
+    textarea:focus {
+      border-width: 2px;
+    }
+
+    .btn-row {
+      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    button {
+      padding: 12px 32px;
+      font-size: 14px;
+      font-weight: 500;
+      background: #000;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    button:hover {
+      background: #333;
+    }
+
+    button:disabled {
+      background: #999;
+      cursor: not-allowed;
+    }
+
+    .status-text {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .preview-container {
+      flex: 1;
+      border: 1px solid #000;
+      background: #f5f5f5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .preview-container iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    .preview-placeholder {
+      color: #999;
+      font-size: 14px;
+    }
+
+    footer {
+      padding: 12px 24px;
+      border-top: 1px solid #000;
+      font-size: 13px;
+      display: flex;
+      gap: 24px;
+    }
+
+    footer span {
+      color: #666;
+    }
+
+    footer strong {
+      color: #000;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #999;
+      border-top-color: #000;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .download-links {
+      margin-top: 16px;
+      font-size: 13px;
+    }
+
+    .download-links a {
+      color: #000;
+      margin-right: 16px;
+    }
+
+    .log-box {
+      margin-top: 16px;
+      border: 1px solid #ccc;
+      background: #fafafa;
+      padding: 12px;
+      font-size: 12px;
+      font-family: monospace;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+
+    .log-box div {
+      padding: 2px 0;
+      color: #666;
+    }
+
+    .log-box div:last-child {
+      color: #000;
+    }
+  </style>
+</head>
+<body>
+  <header>PPTX Skill Demo</header>
+
+  <main>
+    <div class="panel panel-left">
+      <div class="panel-title">Input</div>
+      <textarea id="prompt" placeholder="Enter your prompt here...
+
+Example:
+Create a 3-slide presentation about Introduction to AI:
+1. Title slide
+2. What is AI
+3. Summary"></textarea>
+      <div class="btn-row">
+        <button id="generateBtn" onclick="generate()">Generate</button>
+        <span id="statusText" class="status-text"></span>
+      </div>
+      <div id="logBox" class="log-box" style="display:none;"></div>
+      <div id="downloadLinks" class="download-links"></div>
+    </div>
+
+    <div class="panel panel-right">
+      <div class="panel-title">Preview</div>
+      <div class="preview-container" id="previewContainer">
+        <span class="preview-placeholder">PDF preview will appear here</span>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <span>Status: <strong id="footerStatus">Ready</strong></span>
+    <span>Duration: <strong id="footerDuration">--</strong></span>
+    <span>Cost: <strong id="footerCost">--</strong></span>
+  </footer>
+
+  <script>
+    const promptEl = document.getElementById('prompt');
+    const generateBtn = document.getElementById('generateBtn');
+    const statusText = document.getElementById('statusText');
+    const logBox = document.getElementById('logBox');
+    const downloadLinks = document.getElementById('downloadLinks');
+    const previewContainer = document.getElementById('previewContainer');
+    const footerStatus = document.getElementById('footerStatus');
+    const footerDuration = document.getElementById('footerDuration');
+    const footerCost = document.getElementById('footerCost');
+
+    function addLog(msg) {
+      const div = document.createElement('div');
+      div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logBox.appendChild(div);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function generate() {
+      const prompt = promptEl.value.trim();
+      if (!prompt) {
+        alert('Please enter a prompt');
+        return;
+      }
+
+      // Update UI
+      generateBtn.disabled = true;
+      statusText.innerHTML = '<span class="loading"></span>Generating...';
+      footerStatus.textContent = 'Generating';
+      downloadLinks.innerHTML = '';
+      logBox.innerHTML = '';
+      logBox.style.display = 'block';
+      previewContainer.innerHTML = '<span class="preview-placeholder">Generating...</span>';
+
+      // SSE connection
+      const eventSource = new EventSource('/api/generate?prompt=' + encodeURIComponent(prompt));
+
+      eventSource.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+
+        if (data.type === 'ping') {
+          // heartbeat, ignore
+        } else if (data.type === 'progress') {
+          addLog(data.message);
+        } else if (data.type === 'done') {
+          addLog('Done!');
+          eventSource.close();
+
+          // Update preview
+          previewContainer.innerHTML = `<iframe src="${data.pdf}"></iframe>`;
+
+          // Update download links
+          downloadLinks.innerHTML = `
+            <a href="${data.pptx}" download>Download PPTX</a>
+            <a href="${data.pdf}" download>Download PDF</a>
+          `;
+
+          // Update footer
+          footerStatus.textContent = 'Done';
+          footerDuration.textContent = (data.duration / 1000).toFixed(1) + 's';
+          footerCost.textContent = '$' + data.cost;
+          statusText.textContent = 'Done';
+          generateBtn.disabled = false;
+
+        } else if (data.type === 'error') {
+          addLog('Error: ' + data.message);
+          eventSource.close();
+          footerStatus.textContent = 'Error';
+          statusText.textContent = 'Error';
+          previewContainer.innerHTML = `<span class="preview-placeholder">Error: ${data.message}</span>`;
+          generateBtn.disabled = false;
+        }
+      };
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        addLog('Connection lost');
+        generateBtn.disabled = false;
+      };
+    }
+
+    // Check health on load
+    fetch('/api/health')
+      .then(r => r.json())
+      .then(data => {
+        if (data.libreOffice === 'not installed') {
+          footerStatus.textContent = 'Warning: LibreOffice not installed';
+          footerStatus.style.color = 'red';
+        }
+      });
+  </script>
+</body>
+</html>

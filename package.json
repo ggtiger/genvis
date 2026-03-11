@@ -1,0 +1,327 @@
+{
+  "name": "genvis",
+  "version": "0.0.1",
+  "description": "AI-Powered Web App Builder - Build apps with natural language using Claude Code, Cursor, and more",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "npm run type-check && node scripts/run-web.js",
+    "dev:web": "npm run type-check && node scripts/run-web.js",
+    "dev:desktop": "npm run type-check && node scripts/run-desktop.js",
+    "dev:electron": "npm run dev:desktop",
+    "ensure:env": "node scripts/setup-env.js",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next build",
+    "prebuild:skills": "node scripts/prebuild-skills.js",
+    "clean:nonprebuilt-skills": "node scripts/clean-nonprebuilt-skills.js",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio",
+    "check-cli": "node scripts/check-claude-cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "postinstall": "npm run ensure:env"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.76",
+    "@larksuiteoapi/node-sdk": "^1.59.0",
+    "@paralleldrive/cuid2": "^3.0.4",
+    "@tailwindcss/typography": "^0.5.19",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
+    "adm-zip": "^0.5.16",
+    "better-sqlite3": "^12.5.0",
+    "bufferutil": "^4.1.0",
+    "dingtalk-stream-sdk-nodejs": "^2.0.4",
+    "docx": "^9.5.1",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.45.1",
+    "easymde": "^2.20.0",
+    "fast-xml-parser": "^5.3.6",
+    "fflate": "^0.8.2",
+    "framer-motion": "^11.11.17",
+    "front-matter": "^4.0.2",
+    "gray-matter": "^4.0.3",
+    "highlight.js": "^11.11.1",
+    "js-yaml": "^4.1.1",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.460.0",
+    "mammoth": "^1.11.0",
+    "marked": "^17.0.1",
+    "next": "^15.5.6",
+    "node-pty": "^1.1.0",
+    "pptx-preview": "^1.0.7",
+    "pptxgenjs": "^4.0.1",
+    "qrcode.react": "^4.2.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-markdown": "^10.1.0",
+    "react-simplemde-editor": "^5.2.0",
+    "reading-time": "^1.5.0",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1",
+    "tree-kill": "^1.2.2",
+    "turndown": "^7.2.2",
+    "turndown-plugin-gfm": "^1.0.2",
+    "utf-8-validate": "^6.0.6",
+    "ws": "^8.18.0",
+    "xlsx-republish": "^0.20.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.5",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/turndown": "^5.0.6",
+    "@types/ws": "^8.18.1",
+    "autoprefixer": "^10.4.20",
+    "cross-env": "^10.1.0",
+    "drizzle-kit": "^0.31.8",
+    "electron": "^39.0.0",
+    "electron-builder": "^25.1.6",
+    "eslint": "^9.17.0",
+    "eslint-config-next": "15.1.0",
+    "fast-check": "^4.5.3",
+    "postcss": "^8.4.49",
+    "prettier": "^3.4.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "keywords": [
+    "ai",
+    "claude",
+    "cursor",
+    "app-builder",
+    "nextjs",
+    "code-generation",
+    "no-code",
+    "low-code"
+  ],
+  "author": "Genvis Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ggtiger/Genvis.git"
+  },
+  "build": {
+    "appId": "cn.genvis.desktop",
+    "productName": "Genvis",
+    "electronLanguages": [
+      "en",
+      "zh-CN"
+    ],
+    "npmRebuild": false,
+    "files": [
+      "electron/**/*",
+      "package.json",
+      ".next/static/**/*",
+      "public/**/*",
+      "node_modules/**/*",
+      "!**/*.md",
+      "!**/*.ts",
+      "!**/*.tsx",
+      "!.next/standalone/**",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-darwin/**",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-linux/**",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-darwin/**",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-linux/**",
+      "!**/node_modules/node-pty/prebuilds/win32-*/**",
+      "!**/node_modules/node-pty/prebuilds/linux-*/**",
+      "!**/node_modules/node-pty/prebuilds/darwin-x64/**",
+      "!**/node_modules/typescript/**",
+      "!**/node_modules/@types/**",
+      "!**/node_modules/eslint/**",
+      "!**/node_modules/prettier/**"
+    ],
+    "asarUnpack": [
+      "**/node_modules/@next/**/*.node",
+      "**/node_modules/better-sqlite3/**/*.node",
+      "**/node_modules/@napi-rs/**/*.node",
+      "**/node_modules/@img/**/*.node",
+      "**/node_modules/sharp/**/*.node",
+      "**/node_modules/node-pty/**",
+      "**/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-win32/**",
+      "**/@anthropic-ai/claude-agent-sdk/cli.js",
+      "**/@anthropic-ai/claude-agent-sdk/**/*.wasm"
+    ],
+    "beforePack": "./scripts/download-tiktok-downloader.js",
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "standalone",
+        "filter": [
+          "**/*",
+          "!.*",
+          "!public/**",
+          "!node-runtime/**",
+          "!.git/**",
+          "!python-runtime/**",
+          "!skills/**",
+          "!data/projects/**/logs/**",
+          "!data/projects/**/node_modules/**",
+          "!data/projects/**/dist/**",
+          "!data/projects/**/.next/**",
+          "!data/projects/**/venv/**",
+          "!data/projects/**/.venv/**",
+          "!data/projects/**/__pycache__/**",
+          "!data/projects/**/*.pyc",
+          "!data/projects/**/*.log",
+          "!data/user-skills/**/node_modules/**",
+          "!data/user-skills/**/dist/**",
+          "!data/user-skills/**/venv/**",
+          "!data/user-skills/**/.venv/**",
+          "*.log",
+          "*.tsbuildinfo",
+          "!node_modules/typescript/**",
+          "!node_modules/@types/**",
+          "!node_modules/eslint/**",
+          "!node_modules/prettier/**",
+          "!data/data/**",
+          "!data/secretary-uploads/**",
+          "!data/logs/**"
+        ]
+      },
+      {
+        "from": ".next/standalone/.next",
+        "to": "standalone/.next",
+        "filter": [
+          "**/*",
+          "!cache/**",
+          "!static/**"
+        ]
+      },
+      {
+        "from": ".next/static",
+        "to": "standalone/.next/static",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "public",
+        "to": "standalone/public",
+        "filter": [
+          "**/*",
+          "!screenshot/**"
+        ]
+      },
+      {
+        "from": "python-runtime",
+        "to": "python-runtime",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "lib/db/migrations",
+        "to": "migrations"
+      },
+      {
+        "from": "skills",
+        "to": "skills",
+        "filter": [
+          "**/*",
+          "!.**",
+          "!**/node_modules/**",
+          "!**/venv/**",
+          "!**/.venv/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/dist/**",
+          "!**/.git/**",
+          "!**/dev.db",
+          "!**/dev.db-journal",
+          "!**/dev.db-wal",
+          "!**/.env",
+          "!**/.DS_Store",
+          "!**/.next/cache/**",
+          "!**/.next/standalone/**",
+          "!**/logs/**",
+          "!**/*.log",
+          "!**/*.ndjson",
+          "!**/build/**",
+          "!**/.turbo/**"
+        ]
+      },
+      {
+        "from": "builtin-employees.json",
+        "to": "builtin-employees.json"
+      },
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "afterSign": "tools/macos-signing/afterSign.js",
+    "asar": true,
+    "directories": {
+      "buildResources": "resources",
+      "output": "dist"
+    },
+    "mac": {
+      "artifactName": "${productName}-${version}-${arch}-mac.${ext}",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "tools/macos-signing/entitlements/main.plist",
+      "entitlementsInherit": "tools/macos-signing/entitlements/inherit.plist",
+      "notarize": true,
+      "extraResources": [
+        {
+          "from": "node-runtime/darwin-${arch}",
+          "to": "node-runtime/darwin-${arch}",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "artifactName": "${productName}-Setup-${version}-x64.${ext}",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "extraResources": [
+        {
+          "from": "node-runtime/win32-x64",
+          "to": "node-runtime/win32-x64",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "git-runtime/win32-x64",
+          "to": "git-runtime/win32-x64",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development"
+    }
+  }
+}

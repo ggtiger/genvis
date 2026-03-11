@@ -1,0 +1,128 @@
+{
+  "skillName": "productivity-hub",
+  "displayName": "个人效率助手",
+  "description": "管理待办事项、日程安排和笔记的效率工具",
+  "auth": { "authType": "none" },
+  "endpoints": [
+    {
+      "path": "/api/todos",
+      "method": "POST",
+      "description": "创建待办事项",
+      "parameters": [
+        { "name": "title", "type": "string", "required": true, "description": "待办标题" },
+        { "name": "description", "type": "string", "required": false, "description": "待办描述" },
+        { "name": "dueDate", "type": "string", "required": false, "description": "截止日期 ISO 格式" },
+        { "name": "priority", "type": "string", "required": false, "description": "优先级: low/medium/high" }
+      ],
+      "responseDescription": "创建成功的待办对象",
+      "responseFields": [
+        { "name": "id", "type": "string", "description": "待办 ID" },
+        { "name": "title", "type": "string", "description": "待办标题" },
+        { "name": "status", "type": "string", "description": "状态: pending/in-progress/completed" },
+        { "name": "createdAt", "type": "string", "description": "创建时间 ISO 格式" }
+      ]
+    },
+    {
+      "path": "/api/todos",
+      "method": "GET",
+      "description": "查询待办列表",
+      "parameters": [
+        { "name": "status", "type": "string", "required": false, "description": "按状态筛选" },
+        { "name": "priority", "type": "string", "required": false, "description": "按优先级筛选" }
+      ],
+      "responseDescription": "待办事项数组",
+      "responseFields": [
+        { "name": "id", "type": "string", "description": "待办 ID" },
+        { "name": "title", "type": "string", "description": "待办标题" },
+        { "name": "status", "type": "string", "description": "状态" },
+        { "name": "priority", "type": "string", "description": "优先级" },
+        { "name": "dueDate", "type": "string", "description": "截止日期" }
+      ]
+    },
+    {
+      "path": "/api/todos/{id}",
+      "method": "DELETE",
+      "description": "删除待办事项",
+      "parameters": [
+        { "name": "id", "type": "string", "required": true, "description": "待办 ID（路径参数）" }
+      ],
+      "responseDescription": "删除结果",
+      "responseFields": [
+        { "name": "success", "type": "boolean", "description": "是否成功" },
+        { "name": "message", "type": "string", "description": "结果消息" }
+      ]
+    },
+    {
+      "path": "/api/todos/{id}",
+      "method": "PUT",
+      "description": "更新待办事项",
+      "parameters": [
+        { "name": "id", "type": "string", "required": true, "description": "待办 ID（路径参数）" },
+        { "name": "title", "type": "string", "required": false, "description": "待办标题" },
+        { "name": "description", "type": "string", "required": false, "description": "待办描述" },
+        { "name": "status", "type": "string", "required": false, "description": "状态: pending/in-progress/completed" },
+        { "name": "priority", "type": "string", "required": false, "description": "优先级: low/medium/high" },
+        { "name": "dueDate", "type": "string", "required": false, "description": "截止日期 ISO 格式" }
+      ],
+      "responseDescription": "更新后的待办对象"
+    },
+    {
+      "path": "/api/schedules",
+      "method": "POST",
+      "description": "创建日程",
+      "parameters": [
+        { "name": "title", "type": "string", "required": true, "description": "日程标题" },
+        { "name": "startTime", "type": "string", "required": true, "description": "开始时间 ISO 格式" },
+        { "name": "endTime", "type": "string", "required": false, "description": "结束时间 ISO 格式" },
+        { "name": "description", "type": "string", "required": false, "description": "日程描述" }
+      ]
+    },
+    {
+      "path": "/api/schedules",
+      "method": "GET",
+      "description": "查询日程列表",
+      "parameters": [
+        { "name": "date", "type": "string", "required": false, "description": "按日期筛选" },
+        { "name": "range", "type": "string", "required": false, "description": "日期范围" }
+      ]
+    },
+    {
+      "path": "/api/notes",
+      "method": "POST",
+      "description": "创建笔记",
+      "parameters": [
+        { "name": "title", "type": "string", "required": true, "description": "笔记标题" },
+        { "name": "content", "type": "string", "required": true, "description": "笔记内容" }
+      ]
+    },
+    {
+      "path": "/api/notes",
+      "method": "GET",
+      "description": "查询笔记列表"
+    },
+    {
+      "path": "/api/query",
+      "method": "POST",
+      "description": "自然语言查询待办",
+      "parameters": [
+        { "name": "query", "type": "string", "required": true, "description": "自然语言查询内容" }
+      ]
+    },
+    {
+      "path": "/api/scheduled-tasks",
+      "method": "GET",
+      "description": "查询定时任务列表"
+    },
+    {
+      "path": "/api/scheduled-tasks",
+      "method": "POST",
+      "description": "创建定时任务（到期自动发送消息给秘书）",
+      "parameters": [
+        { "name": "name", "type": "string", "required": true, "description": "任务名称" },
+        { "name": "message", "type": "string", "required": true, "description": "到期时发送给秘书的消息内容" },
+        { "name": "triggerTime", "type": "string", "required": false, "description": "触发时间 ISO 格式" },
+        { "name": "repeatType", "type": "string", "required": false, "description": "重复类型: once/daily/weekly/monthly" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Good抖音短视频转文字Skills</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #fff;
+            color: #000;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left h1 {
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+
+        .settings-btn {
+            background: #f5f5f5;
+            border: 1px solid #d0d0d0;
+            color: #000;
+            padding: 0 16px;
+            height: 32px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: all 0.2s;
+        }
+
+        .settings-btn:hover {
+            background: #ebebeb;
+            border-color: #000;
+        }
+
+        /* Input Section */
+        .input-section {
+            margin-bottom: 16px;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .input-row textarea {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #d0d0d0;
+            background: #fff;
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.2s;
+            resize: none;
+            height: 52px;
+        }
+
+        .input-row textarea:focus {
+            outline: none;
+            border-color: #000;
+        }
+
+        .submit-btn {
+            background: #000;
+            border: 1px solid #000;
+            color: #fff;
+            padding: 0 20px;
+            height: 52px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .submit-btn:hover:not(:disabled) {
+            background: #333;
+        }
+
+        .submit-btn:disabled {
+            background: #666;
+            border-color: #666;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        /* Result Section */
+        .result-section {
+            padding-top: 12px;
+        }
+
+        .result-section.hidden {
+            display: none;
+        }
+
+        .status {
+            padding: 10px 14px;
+            background: #f5f5f5;
+            border: 1px solid #d0d0d0;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+
+        .status.fade-out {
+            opacity: 0;
+            transition: opacity 0.5s ease-out;
+        }
+
+        .status.processing {
+            color: #666;
+        }
+
+        .status.succeeded {
+            background: #e8f5e9;
+            border-color: #4caf50;
+            color: #2e7d32;
+        }
+
+        .status.failed {
+            background: #ffebee;
+            border-color: #f44336;
+            color: #c62828;
+        }
+
+        .video-card {
+            margin-bottom: 12px;
+            padding: 12px;
+            background: #f9f9f9;
+            border: 1px solid #e0e0e0;
+            display: flex;
+            gap: 12px;
+        }
+
+        .video-card-cover {
+            flex-shrink: 0;
+            width: 90px;
+            height: 120px;
+            background: #e0e0e0;
+            overflow: hidden;
+        }
+
+        .video-card-cover img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-card-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .video-card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #000;
+            margin-bottom: 4px;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .video-card-author {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .video-card-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 6px;
+            align-items: center;
+        }
+
+        .meta-tag {
+            font-size: 11px;
+            color: #666;
+            background: #fff;
+            border: 1px solid #d0d0d0;
+            padding: 1px 6px;
+        }
+
+        .meta-btn {
+            font-size: 10px;
+            color: #000;
+            background: #fff;
+            border: 1px solid #000;
+            padding: 1px 6px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .meta-btn:hover {
+            background: #000;
+            color: #fff;
+        }
+
+        .video-card-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .stat-item {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .stat-item span {
+            font-weight: 600;
+            color: #000;
+        }
+
+        .transcript {
+            border: 1px solid #e0e0e0;
+            background: #fff;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .sentence {
+            margin-bottom: 4px;
+            line-height: 1.4;
+        }
+
+        .timestamp {
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 12px;
+            color: #666;
+            margin-right: 8px;
+        }
+
+        .sentence-text {
+            font-size: 14px;
+            color: #000;
+        }
+
+        .copy-btn {
+            background: #f5f5f5;
+            border: 1px solid #d0d0d0;
+            color: #000;
+            padding: 0 20px;
+            height: 36px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: #ebebeb;
+            border-color: #000;
+        }
+
+        .error-message {
+            color: #c62828;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: #fff;
+            border: 1px solid #d0d0d0;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow: auto;
+        }
+
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            color: #000;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #000;
+        }
+
+        .form-textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px;
+            border: 1px solid #d0d0d0;
+            font-size: 13px;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            resize: vertical;
+        }
+
+        .form-textarea:focus {
+            outline: none;
+            border-color: #000;
+        }
+
+        .form-hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+        }
+
+        .modal-footer {
+            padding: 16px 20px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .modal-btn {
+            padding: 0 20px;
+            height: 36px;
+            border: 1px solid #d0d0d0;
+            background: #f5f5f5;
+            color: #000;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .modal-btn:hover {
+            background: #ebebeb;
+            border-color: #000;
+        }
+
+        .modal-btn-primary {
+            background: #000;
+            border-color: #000;
+            color: #fff;
+        }
+
+        .modal-btn-primary:hover {
+            background: #333;
+        }
+
+        .modal-btn:disabled {
+            background: #f5f5f5;
+            border-color: #e0e0e0;
+            color: #999;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <h1>Good 短视频转文字</h1>
+            </div>
+            <button class="settings-btn" id="settingsBtn">设置</button>
+        </div>
+
+        <!-- Input Section -->
+        <div class="input-section">
+            <div class="input-row">
+                <textarea
+                    id="videoUrl"
+                    placeholder="粘贴抖音/TikTok链接或分享文本..."
+                    autocomplete="off"
+                >9.97 n@d.nq gOk:/ 10/17 当年扣子上卖了600万的短视频二创工作流，我已经用coze Skills完美复刻了。 # coze # skills # 短视频二创  https://v.douyin.com/7jlmNsL4510/ 复制此链接，打开Dou音搜索，直接观看视频！</textarea>
+                <button class="submit-btn" id="submitBtn">开始转写</button>
+            </div>
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+
+        <!-- Result Section -->
+        <div class="result-section hidden" id="resultSection">
+            <div class="status" id="statusBox">
+                <span id="statusText">处理中...</span>
+            </div>
+
+            <div class="video-card hidden" id="videoCard">
+                <div class="video-card-cover">
+                    <img id="videoCover" src="" alt="cover">
+                </div>
+                <div class="video-card-info">
+                    <div class="video-card-title" id="videoTitle"></div>
+                    <div class="video-card-author" id="videoAuthor"></div>
+                    <div class="video-card-meta">
+                        <span class="meta-tag" id="videoDuration"></span>
+                        <span class="meta-tag" id="videoCreateTime"></span>
+                        <a class="meta-btn" id="btnDownloadMp3" href="#" target="_blank">下载MP3</a>
+                        <a class="meta-btn" id="btnDownloadVideo" href="#" target="_blank">下载视频</a>
+                        <a class="meta-btn" id="btnOpenOriginal" href="#" target="_blank">打开原链</a>
+                    </div>
+                    <div class="video-card-stats">
+                        <span class="stat-item">点赞 <span id="statDigg">0</span></span>
+                        <span class="stat-item">评论 <span id="statComment">0</span></span>
+                        <span class="stat-item">分享 <span id="statShare">0</span></span>
+                        <span class="stat-item">收藏 <span id="statCollect">0</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="transcript hidden" id="transcript"></div>
+
+            <button class="copy-btn hidden" id="copyBtn">复制全文</button>
+        </div>
+
+        <!-- Settings Modal -->
+        <div class="modal" id="settingsModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="modal-title">设置</div>
+                    <button class="modal-close" id="modalCloseBtn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">Cookie</label>
+                        <textarea
+                            class="form-textarea"
+                            id="cookieInput"
+                            placeholder="粘贴抖音 Cookie..."
+                        ></textarea>
+                        <div class="form-hint">
+                            从浏览器开发者工具中复制抖音的 Cookie，用于获取视频数据
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="modal-btn" id="modalCancelBtn">取消</button>
+                    <button class="modal-btn modal-btn-primary" id="modalSaveBtn">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoUrlInput = document.getElementById('videoUrl');
+        const submitBtn = document.getElementById('submitBtn');
+        const errorMessage = document.getElementById('errorMessage');
+        const resultSection = document.getElementById('resultSection');
+        const statusBox = document.getElementById('statusBox');
+        const statusText = document.getElementById('statusText');
+        const videoCard = document.getElementById('videoCard');
+        const videoCover = document.getElementById('videoCover');
+        const videoTitle = document.getElementById('videoTitle');
+        const videoAuthor = document.getElementById('videoAuthor');
+        const videoDuration = document.getElementById('videoDuration');
+        const videoCreateTime = document.getElementById('videoCreateTime');
+        const statDigg = document.getElementById('statDigg');
+        const statComment = document.getElementById('statComment');
+        const statShare = document.getElementById('statShare');
+        const statCollect = document.getElementById('statCollect');
+        const btnDownloadMp3 = document.getElementById('btnDownloadMp3');
+        const btnDownloadVideo = document.getElementById('btnDownloadVideo');
+        const btnOpenOriginal = document.getElementById('btnOpenOriginal');
+        const transcript = document.getElementById('transcript');
+        const copyBtn = document.getElementById('copyBtn');
+
+        // Settings modal elements
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsModal = document.getElementById('settingsModal');
+        const modalCloseBtn = document.getElementById('modalCloseBtn');
+        const modalCancelBtn = document.getElementById('modalCancelBtn');
+        const modalSaveBtn = document.getElementById('modalSaveBtn');
+        const cookieInput = document.getElementById('cookieInput');
+
+        let currentTaskId = null;
+        let currentSentences = [];
+        let currentOriginalUrl = '';
+
+        // Format duration (seconds to MM:SS)
+        function formatDuration(seconds) {
+            if (!seconds) return '0:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins}:${String(secs).padStart(2, '0')}`;
+        }
+
+        // Format timestamp to readable date
+        function formatDate(timestamp) {
+            if (!timestamp) return '';
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        }
+
+        // Format number (1000 -> 1k, etc)
+        function formatNumber(num) {
+            if (!num) return '0';
+            if (num >= 10000) {
+                return (num / 10000).toFixed(1) + 'w';
+            }
+            if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'k';
+            }
+            return String(num);
+        }
+
+        // Settings modal handlers
+        settingsBtn.addEventListener('click', async () => {
+            settingsModal.classList.add('show');
+            // Load current cookie
+            try {
+                const resp = await fetch('/api/settings/cookie');
+                const data = await resp.json();
+                if (data.success) {
+                    cookieInput.value = data.cookie || '';
+                }
+            } catch (error) {
+                console.error('Failed to load cookie:', error);
+            }
+        });
+
+        function closeModal() {
+            settingsModal.classList.remove('show');
+        }
+
+        modalCloseBtn.addEventListener('click', closeModal);
+        modalCancelBtn.addEventListener('click', closeModal);
+
+        // Close modal when clicking outside
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) {
+                closeModal();
+            }
+        });
+
+        modalSaveBtn.addEventListener('click', async () => {
+            const cookie = cookieInput.value.trim();
+
+            modalSaveBtn.disabled = true;
+            modalSaveBtn.textContent = '保存中...';
+
+            try {
+                const resp = await fetch('/api/settings/cookie', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cookie })
+                });
+
+                const data = await resp.json();
+
+                if (data.success) {
+                    alert('Cookie 保存成功！');
+                    closeModal();
+                } else {
+                    alert('保存失败：' + (data.message || '未知错误'));
+                }
+            } catch (error) {
+                alert('保存失败：' + error.message);
+            } finally {
+                modalSaveBtn.disabled = false;
+                modalSaveBtn.textContent = '保存';
+            }
+        });
+
+        // Format milliseconds to MM:SS
+        function formatTime(ms) {
+            const totalSeconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        // Extract URL from share text
+        function extractUrl(text) {
+            // Match Douyin/TikTok URLs
+            const urlPatterns = [
+                /https?:\/\/v\.douyin\.com\/[A-Za-z0-9]+\/?/,
+                /https?:\/\/www\.douyin\.com\/video\/\d+/,
+                /https?:\/\/vm\.tiktok\.com\/[A-Za-z0-9]+\/?/,
+                /https?:\/\/www\.tiktok\.com\/@[^\/]+\/video\/\d+/
+            ];
+
+            for (const pattern of urlPatterns) {
+                const match = text.match(pattern);
+                if (match) {
+                    return match[0];
+                }
+            }
+
+            return text.trim();
+        }
+
+        // Submit video URL
+        submitBtn.addEventListener('click', async () => {
+            let url = videoUrlInput.value.trim();
+            if (!url) {
+                errorMessage.textContent = '请输入视频链接';
+                return;
+            }
+
+            // Auto extract URL from share text
+            url = extractUrl(url);
+            currentOriginalUrl = url;  // Save for "open original" button
+            videoUrlInput.value = url;  // Update input to show extracted URL
+
+            errorMessage.textContent = '';
+            submitBtn.disabled = true;
+            submitBtn.textContent = '提交中...';
+            resultSection.classList.remove('hidden');
+            statusBox.style.display = '';
+            statusBox.classList.remove('fade-out');
+            statusBox.className = 'status processing';
+            statusText.textContent = '提交任务中...';
+            videoCard.classList.add('hidden');
+            transcript.classList.add('hidden');
+            copyBtn.classList.add('hidden');
+
+            try {
+                const resp = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                if (!resp.ok) {
+                    const error = await resp.json();
+                    throw new Error(error.detail || '提交失败');
+                }
+
+                const data = await resp.json();
+                currentTaskId = data.task_id;
+
+                // Display video card
+                if (data.cover_url) {
+                    videoCover.src = data.cover_url;
+                }
+                videoTitle.textContent = data.title || '';
+                videoAuthor.textContent = data.author ? `@${data.author}` : '';
+                videoDuration.textContent = formatDuration(data.duration);
+                videoCreateTime.textContent = formatDate(data.create_time);
+                statDigg.textContent = formatNumber(data.digg_count);
+                statComment.textContent = formatNumber(data.comment_count);
+                statShare.textContent = formatNumber(data.share_count);
+                statCollect.textContent = formatNumber(data.collect_count);
+
+                // Set download/open buttons
+                btnDownloadMp3.href = data.music_url || '#';
+                btnDownloadVideo.href = data.video_url || '#';
+                btnOpenOriginal.href = currentOriginalUrl;
+
+                videoCard.classList.remove('hidden');
+
+                statusText.textContent = '音频转写中，请稍候...';
+                pollTaskStatus(currentTaskId);
+
+            } catch (error) {
+                errorMessage.textContent = `错误: ${error.message}`;
+                statusBox.className = 'status failed';
+                statusText.textContent = '提交失败';
+                submitBtn.disabled = false;
+                submitBtn.textContent = '开始转写';
+            }
+        });
+
+        // Poll task status (recursive setTimeout)
+        async function pollTaskStatus(taskId, attempts = 200) {
+            if (attempts <= 0) {
+                statusBox.className = 'status failed';
+                statusText.textContent = '转写超时';
+                submitBtn.disabled = false;
+                submitBtn.textContent = '开始转写';
+                return;
+            }
+
+            try {
+                const resp = await fetch(`/api/task/${taskId}`);
+                if (!resp.ok) throw new Error('查询失败');
+
+                const data = await resp.json();
+
+                if (data.status === 'succeeded') {
+                    statusBox.className = 'status succeeded';
+                    statusText.textContent = '转写完成';
+                    displayTranscript(data.text, data.sentences);
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '开始转写';
+                    // Auto hide status after 10 seconds
+                    setTimeout(() => {
+                        statusBox.classList.add('fade-out');
+                        setTimeout(() => {
+                            statusBox.style.display = 'none';
+                        }, 500);
+                    }, 10000);
+                } else if (data.status === 'failed') {
+                    statusBox.className = 'status failed';
+                    statusText.textContent = `转写失败: ${data.error || '未知错误'}`;
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '开始转写';
+                } else {
+                    // Still processing, wait 3 seconds then retry
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    pollTaskStatus(taskId, attempts - 1);
+                }
+            } catch (error) {
+                statusBox.className = 'status failed';
+                statusText.textContent = `查询失败: ${error.message}`;
+                submitBtn.disabled = false;
+                submitBtn.textContent = '开始转写';
+            }
+        }
+
+        // Display transcript
+        function displayTranscript(text, sentences) {
+            currentSentences = sentences || [];
+            transcript.innerHTML = '';
+
+            if (sentences && sentences.length > 0) {
+                sentences.forEach(sent => {
+                    const div = document.createElement('div');
+                    div.className = 'sentence';
+
+                    const timeSpan = document.createElement('span');
+                    timeSpan.className = 'timestamp';
+                    timeSpan.textContent = `[${formatTime(sent.start_ms)}-${formatTime(sent.end_ms)}]`;
+
+                    const textSpan = document.createElement('span');
+                    textSpan.className = 'sentence-text';
+                    textSpan.textContent = sent.text;
+
+                    div.appendChild(timeSpan);
+                    div.appendChild(textSpan);
+                    transcript.appendChild(div);
+                });
+            } else {
+                transcript.textContent = text;
+            }
+
+            transcript.classList.remove('hidden');
+            copyBtn.classList.remove('hidden');
+        }
+
+        // Copy text only (without timestamps)
+        copyBtn.addEventListener('click', () => {
+            let textToCopy = '';
+            if (currentSentences && currentSentences.length > 0) {
+                textToCopy = currentSentences.map(s => s.text).join('');
+            } else {
+                textToCopy = transcript.textContent;
+            }
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '已复制';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                }, 2000);
+            }).catch(err => {
+                alert('复制失败');
+            });
+        });
+    </script>
+</body>
+</html>

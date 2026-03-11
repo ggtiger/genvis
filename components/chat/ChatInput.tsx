@@ -1,0 +1,783 @@
+"use client";
+
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { ArrowUp, MessageSquare, Image as ImageIcon, Wrench, Square, Lock, AlertTriangle, Folder } from 'lucide-react';
+import SlashCommandMenu from './SlashCommandMenu';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '';
+
+type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
+
+const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; shortLabel: string; description: string; hint?: string; warning?: string }[] = [
+  {
+    value: 'default',
+    label: '只读放行',
+    shortLabel: '只读',
+    description: '仅 Read、Glob、Grep、WebFetch、WebSearch 等只读工具自动放行，其他操作需要手动确认',
+    hint: '推荐：如果不确定选什么，或数据很重要，请使用此模式'
+  },
+  {
+    value: 'acceptEdits',
+    label: '允许编辑',
+    shortLabel: '编辑',
+    description: '在只读基础上，Write、Edit、NotebookEdit 等文件编辑也自动放行'
+  },
+  {
+    value: 'bypassPermissions',
+    label: '全放行',
+    shortLabel: '全放行',
+    description: '所有工具自动放行，无需任何确认',
+    warning: '危险模式：可能执行任意操作，请谨慎使用'
+  },
+];
+
+interface UploadedImage {
+  id: string;
+  filename: string;
+  path: string;
+  url: string;
+  assetUrl?: string;
+   publicUrl?: string;
+}
+
+interface ModelPickerOption {
+  id: string;
+  name: string;
+  cli: string;
+  cliName: string;
+  available: boolean;
+}
+
+interface CliPickerOption {
+  id: string;
+  name: string;
+  available: boolean;
+}
+
+interface ChatInputProps {
+  onSendMessage: (message: string, images?: UploadedImage[]) => Promise<boolean>;
+  onStopTask?: () => void;
+  disabled?: boolean;
+  placeholder?: string;
+  defaultValue?: string;
+  mode?: 'act' | 'chat';
+  onModeChange?: (mode: 'act' | 'chat') => void;
+  workMode?: 'code' | 'work' | 'boss' | 'cli';
+  onWorkModeChange?: (mode: 'code' | 'work' | 'boss' | 'cli') => void;
+  work_directory?: string;
+  onWork_directoryChange?: (directory: string) => void;
+  projectId?: string;
+  preferredCli?: string;
+  selectedModel?: string;
+  thinkingMode?: boolean;
+  onThinkingModeChange?: (enabled: boolean) => void;
+  modelOptions?: ModelPickerOption[];
+  onModelChange?: (option: any) => void;
+  modelChangeDisabled?: boolean;
+  cliOptions?: CliPickerOption[];
+  onCliChange?: (cliId: string) => void;
+  cliChangeDisabled?: boolean;
+  projectType?: 'nextjs' | 'python-fastapi';
+  onProjectTypeChange?: (type: 'nextjs' | 'python-fastapi') => void;
+  permissionMode?: PermissionMode;
+  onPermissionModeChange?: (mode: PermissionMode) => void;
+  isRunning?: boolean;
+  onExposeFocus?: (fn: () => void) => void;
+  onExposeInputControl?: (control: { focus: () => void; setMessage: (msg: string) => void }) => void;
+  onInputChange?: (value: string) => void;
+}
+
+export default function ChatInput({
+  onSendMessage,
+  onStopTask,
+  disabled = false,
+  placeholder = "Ask Genvis...",
+  defaultValue = '',
+  mode = 'act',
+  onModeChange,
+  workMode = 'code',
+  onWorkModeChange,
+  work_directory = '',
+  onWork_directoryChange,
+  projectId,
+  preferredCli = 'claude',
+  selectedModel = '',
+  thinkingMode = false,
+  onThinkingModeChange,
+  modelOptions = [],
+  onModelChange,
+  modelChangeDisabled = false,
+  cliOptions = [],
+  onCliChange,
+  cliChangeDisabled = false,
+  projectType = 'nextjs',
+  onProjectTypeChange,
+  permissionMode = 'default',
+  onPermissionModeChange,
+  isRunning = false,
+  onExposeFocus,
+  onExposeInputControl,
+  onInputChange
+}: ChatInputProps) {
+  const [message, setMessage] = useState(defaultValue);
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showPermissionMenu, setShowPermissionMenu] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const submissionLockRef = useRef(false);
+  const supportsImageUpload = preferredCli !== 'cursor' && preferredCli !== 'qwen' && preferredCli !== 'glm';
+
+  const modelOptionsForCli = useMemo(
+    () => modelOptions.filter(option => option.cli === preferredCli),
+    [modelOptions, preferredCli]
+  );
+
+  const selectedModelValue = useMemo(() => {
+    return modelOptionsForCli.some(opt => opt.id === selectedModel) ? selectedModel : '';
+  }, [modelOptionsForCli, selectedModel]);
+
+  useEffect(() => {
+    if (!disabled && !cliChangeDisabled && !modelChangeDisabled) {
+      textareaRef.current?.focus();
+    }
+  }, [disabled, cliChangeDisabled, modelChangeDisabled]);
+
+  useEffect(() => {
+    if (onExposeFocus) {
+      onExposeFocus(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.style.height = '40px';
+          const h = el.scrollHeight;
+          el.style.height = `${Math.min(h, 200)}px`;
+        }
+      });
+    }
+  }, [onExposeFocus]);
+
+  useEffect(() => {
+    if (onExposeInputControl) {
+      onExposeInputControl({
+        focus: () => {
+          const el = textareaRef.current;
+          if (el) {
+            el.focus();
+            el.style.height = '40px';
+            const h = el.scrollHeight;
+            el.style.height = `${Math.min(h, 200)}px`;
+          }
+        },
+        setMessage: (msg: string) => {
+          setMessage(msg);
+          setTimeout(() => {
+            const el = textareaRef.current;
+            if (el) {
+              el.focus();
+              el.style.height = '40px';
+              const h = el.scrollHeight;
+              el.style.height = `${Math.min(h, 200)}px`;
+            }
+          }, 0);
+        }
+      });
+    }
+  }, [onExposeInputControl]);
+
+  // 简单日志：按钮显示/隐藏
+  useEffect(() => {
+    try {
+      if (isRunning && onStopTask) {
+        console.log('显示停止按钮');
+      } else {
+        console.log('显示发送按钮');
+      }
+    } catch {}
+  }, [isRunning, onStopTask]);
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+    }
+
+    // Prevent multiple submissions with both state and ref locks
+    if (isSubmitting || disabled || isUploading || isRunning || submissionLockRef.current) {
+      return;
+    }
+
+    if (!message.trim() && uploadedImages.length === 0) {
+      return;
+    }
+
+    // Set both state and ref locks immediately
+    setIsSubmitting(true);
+    submissionLockRef.current = true;
+
+    try {
+      // Send message and images separately - unified_manager will add image references
+      const success = await onSendMessage(message.trim(), uploadedImages);
+
+      // Only clear input if submission was successful
+      if (success) {
+        setMessage('');
+        setUploadedImages([]);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = '40px';
+        }
+      }
+    } finally {
+      // Reset submission locks after a reasonable delay
+      setTimeout(() => {
+        setIsSubmitting(false);
+        submissionLockRef.current = false;
+      }, 200);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      // Check if IME is composing (prevents submission during Chinese input)
+      if (e.nativeEvent.isComposing || isComposing) {
+        return;
+      }
+
+      e.preventDefault();
+      // Check all locks before submitting
+      if (!isSubmitting && !disabled && !isUploading && !isRunning && !submissionLockRef.current && (message.trim() || uploadedImages.length > 0)) {
+        handleSubmit();
+      }
+    }
+  };
+
+  const adjustTextareaHeight = () => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = '40px';
+      const scrollHeight = textarea.scrollHeight;
+      textarea.style.height = `${Math.min(scrollHeight, 200)}px`;
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    await handleFiles(files);
+  };
+
+  const removeImage = (id: string) => {
+    setUploadedImages(prev => {
+      const imageToRemove = prev.find(img => img.id === id);
+      if (imageToRemove) {
+        URL.revokeObjectURL(imageToRemove.url);
+      }
+      return prev.filter(img => img.id !== id);
+    });
+  };
+
+  // Handle files (for both drag drop and file input)
+  const handleFiles = useCallback(async (files: FileList) => {
+    if (!projectId) {
+      console.error('❌ No project ID available for image upload');
+      alert('No project selected. Please choose a project first.');
+      return;
+    }
+
+    if (!supportsImageUpload) {
+      console.error('❌ Current CLI does not support image upload:', preferredCli);
+      alert(`Only Claude CLI supports image uploads.\nCurrent CLI: ${preferredCli}\nSwitch to Claude CLI.`);
+      return;
+    }
+
+    setIsUploading(true);
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+
+        // Check if file is an image
+        if (!file.type.startsWith('image/')) {
+          continue;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch(`${API_BASE}/api/assets/${projectId}/upload`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`❌ Upload failed for ${file.name}:`, response.status, errorText);
+          throw new Error(`Failed to upload ${file.name}: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+        const imageUrl = URL.createObjectURL(file);
+
+        const newImage: UploadedImage = {
+          id: crypto.randomUUID(),
+          filename: result.filename,
+          path: result.absolute_path,
+          url: imageUrl,
+          assetUrl: `/api/assets/${projectId}/${result.filename}`,
+          publicUrl: typeof result.public_url === 'string' ? result.public_url : undefined
+        };
+
+        setUploadedImages(prev => [...prev, newImage]);
+      }
+    } catch (error) {
+      console.error('❌ Image upload failed:', error);
+      alert('Image upload failed. Please try again.');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }, [projectId, supportsImageUpload, preferredCli]);
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [message]);
+
+  // Handle clipboard paste for images
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!projectId || !supportsImageUpload) return;
+      
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      
+      const imageFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            imageFiles.push(file);
+          }
+        }
+      }
+      
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        const fileList = {
+          length: imageFiles.length,
+          item: (index: number) => imageFiles[index],
+          [Symbol.iterator]: function* () {
+            for (let i = 0; i < imageFiles.length; i++) {
+              yield imageFiles[i];
+            }
+          }
+        } as FileList;
+        
+        // Convert to FileList-like object
+        Object.defineProperty(fileList, 'length', { value: imageFiles.length });
+        imageFiles.forEach((file, index) => {
+          Object.defineProperty(fileList, index, { value: file });
+        });
+        
+        handleFiles(fileList);
+      }
+    };
+    
+    document.addEventListener('paste', handlePaste);
+    
+    return () => {
+      document.removeEventListener('paste', handlePaste);
+    };
+  }, [projectId, supportsImageUpload, handleFiles]);
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (projectId && supportsImageUpload) {
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragOver(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (projectId && supportsImageUpload) {
+      e.dataTransfer.dropEffect = 'copy';
+    } else {
+      e.dataTransfer.dropEffect = 'none';
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    if (!projectId || !supportsImageUpload) return;
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleFiles(files);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      className="relative w-full max-w-4xl mx-auto"
+    >
+      {/* Code/Work Mode Tabs - temporarily hidden */}
+      {/* {!projectId && onWorkModeChange && (
+        <div className="flex items-center gap-1 mb-[-1px] ml-4">
+          <button
+            type="button"
+            onClick={() => onWorkModeChange('code')}
+            className={`px-4 py-2 rounded-t-lg text-sm font-medium transition-colors border border-b-0 ${
+              workMode === 'code'
+                ? 'bg-green-100 text-green-800 border-green-300'
+                : 'bg-white/15 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-white/20 dark:border-white/10 hover:bg-white/25 dark:hover:bg-white/10'
+            }`}
+          >
+            Code 模式
+          </button>
+          <button
+            type="button"
+            onClick={() => onWorkModeChange('work')}
+            className={`px-4 py-2 rounded-t-lg text-sm font-medium transition-colors border border-b-0 ${
+              workMode === 'work'
+                ? 'bg-green-100 text-green-800 border-green-300'
+                : 'bg-white/15 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-white/20 dark:border-white/10 hover:bg-white/25 dark:hover:bg-white/10'
+            }`}
+          >
+            Work 模式
+          </button>
+        </div>
+      )} */}
+
+      {/* Single border container */}
+      <div className={`bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl rounded-[28px] border shadow-xl overflow-visible transition-all duration-200 ${
+        isDragOver ? 'border-blue-400' : 'border-white/40 dark:border-white/10'
+      }`}>
+        {/* Drag & Drop Overlay */}
+        {isDragOver && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-blue-50/90 rounded-[28px] z-50 pointer-events-none border-2 border-dashed border-blue-400">
+            <div className="text-blue-600 text-lg font-medium mb-2">Drop images here</div>
+            <div className="text-blue-500 text-sm">Drag and drop your image files</div>
+            <div className="mt-4">
+              <svg className="w-12 h-12 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+            </div>
+          </div>
+        )}
+
+        {/* Uploaded Images Preview - no extra background/border */}
+        {uploadedImages.length > 0 && (
+          <div className="px-4 pt-4 pb-2">
+            <div className="flex flex-wrap gap-2">
+              {uploadedImages.map((image) => (
+                <div key={image.id} className="relative group">
+                  <div className="w-20 h-20 rounded-lg overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={image.url}
+                      alt={image.filename}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeImage(image.id)}
+                    className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs hover:bg-red-600"
+                    title="Remove image"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Text Input Area - transparent background, no border */}
+        <div className="relative px-2 py-1.5">
+          <textarea
+            ref={textareaRef}
+            value={message}
+            onChange={(e) => {
+              setMessage(e.target.value);
+              onInputChange?.(e.target.value);
+            }}
+            onKeyDown={handleKeyDown}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={() => setIsComposing(false)}
+            className="w-full resize-none text-base leading-relaxed bg-transparent p-2 pb-12 text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none"
+            id="chatinput"
+            placeholder={placeholder}
+            disabled={disabled || isUploading || isSubmitting}
+            style={{ minHeight: '120px' }}
+          />
+
+          {/* Bottom Toolbar - Inside textarea, clean design */}
+          <div className="absolute bottom-5 left-6 right-6 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              {/* Image Upload Button - show on task page for both code and work modes */}
+              {projectId && supportsImageUpload && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-1 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:text-slate-400 rounded-full transition-colors"
+                  title="Upload images"
+                  disabled={isUploading || disabled}
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleImageUpload}
+                    disabled={isUploading || disabled}
+                    className="hidden"
+                  />
+                </button>
+              )}
+
+              {/* Permission Mode Selector - show on task page */}
+              {projectId && onPermissionModeChange && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowPermissionMenu(!showPermissionMenu)}
+                    className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-300 transition-colors"
+                  >
+                    <Lock className="h-3.5 w-3.5" />
+                    <span>{PERMISSION_MODE_OPTIONS.find(opt => opt.value === permissionMode)?.shortLabel || '只读'}</span>
+                  </button>
+
+                  {/* Permission Mode Dropdown */}
+                  {showPermissionMenu && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-[100]"
+                        onClick={() => setShowPermissionMenu(false)}
+                      />
+                      <div className="absolute bottom-full left-0 mb-2 w-80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-lg shadow-lg z-[101]">
+                        <div className="p-2">
+                          <div className="text-xs font-medium text-slate-500 dark:text-slate-400 px-2 py-1 mb-1">权限模式</div>
+                          {PERMISSION_MODE_OPTIONS.map(option => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => {
+                                onPermissionModeChange(option.value);
+                                setShowPermissionMenu(false);
+                                requestAnimationFrame(() => textareaRef.current?.focus());
+                              }}
+                              className={`w-full text-left px-2 py-2 rounded-md text-sm transition-colors ${
+                                permissionMode === option.value
+                                  ? 'bg-white/15 dark:bg-white/5'
+                                  : 'hover:bg-white/10 dark:hover:bg-white/5'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-slate-800 dark:text-white">{option.label}</span>
+                                {permissionMode === option.value && (
+                                  <span className="text-xs text-slate-400 dark:text-slate-500">当前</span>
+                                )}
+                              </div>
+                              <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{option.description}</div>
+                              {option.hint && (
+                                <div className="text-xs text-blue-600 mt-1">{option.hint}</div>
+                              )}
+                              {option.warning && (
+                                <div className="flex items-center gap-1 text-xs text-amber-600 mt-1">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  <span>{option.warning}</span>
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Work Mode on task page: Show directory selector as single button */}
+              {projectId && workMode === 'work' && onWork_directoryChange && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (typeof window !== 'undefined' && (window as any).desktopAPI?.selectDirectory) {
+                      try {
+                        const result = await (window as any).desktopAPI.selectDirectory();
+                        if (result?.success && result?.path) {
+                          onWork_directoryChange(result.path);
+                        } else if (!result?.canceled) {
+                          alert('Failed to select directory: ' + (result?.error || 'Unknown error'));
+                        }
+                      } catch (error) {
+                        console.error('Error selecting directory:', error);
+                        alert('Failed to select directory');
+                      }
+                    } else {
+                      alert('Directory selection is not supported in this environment. Please use the desktop client.');
+                    }
+                  }}
+                  className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-300 transition-colors"
+                  title={work_directory || '点击选择工作区'}
+                >
+                  <Folder className="h-3.5 w-3.5" />
+                  <span className="truncate max-w-[80px]">
+                    {work_directory ? (work_directory.split(/[/\\]/).pop() || work_directory) : '未选择'}
+                  </span>
+                </button>
+              )}
+
+              {/* Hidden controls - kept for future use */}
+              {false && (
+                <>
+                  {/* Slash Command Menu */}
+                  <SlashCommandMenu
+                    onSelectCommand={(command) => {
+                      setMessage(command);
+                      setTimeout(() => {
+                        if (!isSubmitting && !disabled && !isUploading && !isRunning && !submissionLockRef.current) {
+                          handleSubmit();
+                        }
+                      }, 100);
+                    }}
+                    disabled={disabled || isUploading || isSubmitting || isRunning}
+                  />
+
+                  {/* Mode Toggle - Act/Chat */}
+                  {onModeChange && (
+                    <button
+                      type="button"
+                      onClick={() => onModeChange?.(mode === 'act' ? 'chat' : 'act')}
+                      className="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:text-white transition-colors"
+                      title={mode === 'act' ? 'Act Mode: AI can modify code (click to switch to Chat)' : 'Chat Mode: AI provides answers only (click to switch to Act)'}
+                    >
+                      {mode === 'act' ? (
+                        <>
+                          <Wrench className="h-3 w-3" />
+                          <span>Act</span>
+                        </>
+                      ) : (
+                        <>
+                          <MessageSquare className="h-3 w-3" />
+                          <span>Chat</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {/* Model Selector */}
+                  <select
+                    value={selectedModelValue}
+                    onChange={(e) => {
+                      const option = modelOptionsForCli.find(opt => opt.id === e.target.value);
+                      if (option) {
+                        onModelChange?.(option);
+                        requestAnimationFrame(() => textareaRef.current?.focus());
+                      }
+                    }}
+                    disabled={modelChangeDisabled || !onModelChange || modelOptionsForCli.length === 0}
+                    className="text-xs text-slate-600 dark:text-slate-400 bg-transparent border-0 focus:outline-none focus:ring-0 disabled:opacity-60 cursor-pointer hover:text-slate-800 dark:text-white"
+                  >
+                    {modelOptionsForCli.length === 0 && <option value="">No models</option>}
+                    {modelOptionsForCli.length > 0 && selectedModelValue === '' && (
+                      <option value="" disabled>Select model</option>
+                    )}
+                    {modelOptionsForCli.map(option => (
+                      <option key={option.id} value={option.id} disabled={!option.available}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Project Type Selector - hidden in boss mode */}
+                  {!projectId && onProjectTypeChange && workMode !== 'boss' && (
+                    <>
+                      <span className="text-slate-300 dark:text-slate-600">|</span>
+                      <select
+                        value={projectType}
+                        onChange={(e) => {
+                          onProjectTypeChange?.(e.target.value as 'nextjs' | 'python-fastapi');
+                          requestAnimationFrame(() => textareaRef.current?.focus());
+                        }}
+                        className="text-xs text-slate-600 dark:text-slate-400 bg-transparent border-0 focus:outline-none focus:ring-0 cursor-pointer hover:text-slate-800 dark:text-white"
+                      >
+                        <option value="nextjs">Next.js</option>
+                        <option value="python-fastapi">Python FastAPI</option>
+                      </select>
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* Assistant Selector - hidden but functional */}
+              <select
+                value={preferredCli}
+                onChange={(e) => {
+                  onCliChange?.(e.target.value);
+                  requestAnimationFrame(() => textareaRef.current?.focus());
+                }}
+                disabled={cliChangeDisabled || !onCliChange}
+                className="hidden"
+              >
+                {cliOptions.length === 0 && <option value={preferredCli}>{preferredCli}</option>}
+                {cliOptions.map(option => (
+                  <option key={option.id} value={option.id} disabled={!option.available}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Send/Stop Button - clean round button */}
+            {isRunning && onStopTask ? (
+              <button
+                type="button"
+                onClick={onStopTask}
+                className="flex items-center justify-center w-8 h-8 bg-black dark:bg-white text-white dark:text-black rounded-full hover:opacity-90 transition-all active:scale-95"
+                title="Stop task"
+              >
+                <Square className="h-3.5 w-3.5 fill-current" />
+              </button>
+            ) : (
+              <button
+                id="chatinput-send-message-button"
+                type="submit"
+                className="flex items-center justify-center w-8 h-8 bg-black dark:bg-white text-white dark:text-black rounded-full hover:opacity-90 hover:scale-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                disabled={disabled || isSubmitting || isUploading || (!message.trim() && uploadedImages.length === 0) || isRunning}
+                title="Send message"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </form>
+  );
+}

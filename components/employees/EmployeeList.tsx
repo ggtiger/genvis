@@ -1,0 +1,214 @@
+"use client";
+
+import { useState, useEffect } from 'react';
+import { User, CheckCircle } from 'lucide-react';
+import type { Employee } from '@/types/backend/employee';
+import EmployeeFormModal from './EmployeeFormModal';
+import { getAvatarIcon } from './EmployeeFormModal';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '';
+
+interface EmployeeStats {
+  task_count: number;
+  total_tokens: number;
+}
+
+interface EmployeeListProps {
+  onAssignWork?: (employee: Employee, shiftKey?: boolean) => void;
+  createTrigger?: number;
+}
+
+// Mode badge color mapping
+function getModeBadgeClasses(mode: string): string {
+  switch (mode) {
+    case 'code': return 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300';
+    case 'work': return 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300';
+    case 'secretary': return 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900 dark:text-indigo-300';
+    case 'boss': return 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900 dark:text-yellow-300';
+    case 'cli': return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300';
+    default: return 'bg-purple-100 text-purple-600 dark:bg-purple-900 dark:text-purple-300';
+  }
+}
+
+export default function EmployeeList({ onAssignWork, createTrigger }: EmployeeListProps) {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [stats, setStats] = useState<Record<string, EmployeeStats>>({});
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+
+  const loadEmployees = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/employees`);
+      if (response.ok) {
+        const data = await response.json();
+        setEmployees(data.data || []);
+      }
+    } catch (error) {
+      console.error('Failed to load employees:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/employees/stats`);
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data.data || {});
+      }
+    } catch (error) {
+      console.error('Failed to load employee stats:', error);
+    }
+  };
+
+  useEffect(() => {
+    loadEmployees();
+    loadStats();
+  }, []);
+
+  const handleCreate = () => {
+    setEditingEmployee(null);
+    setIsModalOpen(true);
+  };
+
+  // External trigger to open create modal
+  useEffect(() => {
+    if (createTrigger && createTrigger > 0) {
+      handleCreate();
+    }
+  }, [createTrigger]);
+
+  const handleEdit = (employee: Employee) => {
+    setEditingEmployee(employee);
+    setIsModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    setIsModalOpen(false);
+    setEditingEmployee(null);
+    await loadEmployees();
+    setMessage({ type: 'success', text: editingEmployee ? '更新成功' : '创建成功' });
+    setTimeout(() => setMessage(null), 2000);
+  };
+
+  const handleAssignWork = (employee: Employee, shiftKey?: boolean) => {
+    if (onAssignWork) {
+      onAssignWork(employee, shiftKey);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
+
+      {/* Message */}
+      {message && (
+        <div className={`mx-6 mb-2 px-4 py-2 rounded-lg text-sm ${
+          message.type === 'success' ? 'bg-green-50 dark:bg-green-500/10 text-green-700 dark:text-green-400' : 'bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-400'
+        }`}>
+          {message.text}
+        </div>
+      )}
+
+      {/* Employee Grid */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="text-slate-500 dark:text-slate-400">加载中...</div>
+          </div>
+        ) : employees.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="w-20 h-20 rounded-full bg-white/50 dark:bg-white/10 border border-white/30 flex items-center justify-center mx-auto mb-4">
+              <User className="w-10 h-10 text-slate-500 dark:text-slate-400" />
+            </div>
+            <p className="text-slate-500 dark:text-slate-400">暂无员工</p>
+            <p className="text-sm text-slate-400 dark:text-slate-500 mt-2">点击右上角新建按钮创建员工</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-6">
+            {employees.map((employee) => {
+              const empStats = stats[employee.id];
+              const taskCount = empStats?.task_count || 0;
+              const hasTask = taskCount > 0;
+
+              return (
+                <div
+                  key={employee.id}
+                  className="glass-card rounded-2xl p-6 flex flex-col items-center text-center relative group cursor-pointer"
+                  onClick={(e) => handleAssignWork(employee, e.shiftKey)}
+                >
+                  {/* Mode badge */}
+                  <div className="absolute top-4 right-4">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide ${getModeBadgeClasses(employee.mode)}`}>
+                      {employee.mode}
+                    </span>
+                  </div>
+
+                  {/* Avatar */}
+                  {(() => {
+                    const AvatarIcon = getAvatarIcon(employee.avatar);
+                    return (
+                      <div className="w-20 h-20 rounded-full bg-white/50 dark:bg-white/10 flex items-center justify-center mb-4 border border-white/30 relative"
+                        style={{ boxShadow: '0 0 15px rgba(255, 255, 255, 0.3)' }}
+                      >
+                        <AvatarIcon className="w-10 h-10 text-slate-700 dark:text-slate-300" />
+                      </div>
+                    );
+                  })()}
+
+                  {/* Name */}
+                  <h3 className="font-bold text-lg text-slate-800 dark:text-white mb-1">{employee.name}</h3>
+
+                  {/* Description */}
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mb-4 h-8 line-clamp-2 px-2">
+                    {employee.description || '\u00A0'}
+                  </p>
+
+                  {/* Task count pill */}
+                  <div className={`mt-auto flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg w-full justify-center ${
+                    hasTask
+                      ? 'text-green-600 dark:text-green-400 bg-green-500/10'
+                      : 'text-slate-500 dark:text-slate-400 bg-slate-500/10'
+                  }`}>
+                    <CheckCircle className="w-4 h-4" />
+                    <span>已完成 {taskCount} 任务</span>
+                  </div>
+
+                  {/* Hover actions overlay */}
+                  <div className="absolute inset-0 rounded-2xl bg-black/40 dark:bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleAssignWork(employee, e.shiftKey); }}
+                      className="px-4 py-2 bg-primary hover:bg-blue-600 text-white text-sm font-medium rounded-xl transition-colors shadow-lg"
+                    >
+                      派活
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleEdit(employee); }}
+                      className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-xl transition-colors backdrop-blur-sm"
+                    >
+                      设置
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Modal */}
+      <EmployeeFormModal
+        open={isModalOpen}
+        employee={editingEmployee}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingEmployee(null);
+        }}
+        onSave={handleSave}
+      />
+    </div>
+  );
+}

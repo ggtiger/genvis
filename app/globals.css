@@ -1,0 +1,659 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;800&display=swap');
+@import '../styles/scrollbar.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .animate-slide-in-right {
+    animation: slide-in-right 0.2s ease-out;
+  }
+}
+
+@layer base {
+  /* Semantic color tokens — auto-switch in dark mode */
+  :root {
+    --color-bg-light: #ffffff;
+    --color-bg-subtle: #f9fafb;
+    --color-border-subtle: #e5e7eb;
+    --color-text-main: #0f172a;
+    --color-text-secondary: #1e293b;
+  }
+  :root.dark {
+    --color-bg-light: rgba(30, 41, 59, 0.5);
+    --color-bg-subtle: rgba(30, 41, 59, 0.4);
+    --color-border-subtle: rgba(255, 255, 255, 0.08);
+    --color-text-main: #e2e8f0;
+    --color-text-secondary: #94a3b8;
+  }
+
+  /* Spring Festival theme */
+  :root.spring {
+    --color-bg-light: rgba(139, 0, 0, 0.25);
+    --color-bg-subtle: rgba(153, 0, 0, 0.18);
+    --color-border-subtle: rgba(220, 38, 38, 0.3);
+    --color-text-main: #fef2f2;
+    --color-text-secondary: #fca5a5;
+    --primary-color: rgba(220, 38, 38, var(--gradient-opacity));
+    --primary-hex: #dc2626;
+    --secondary-color: rgba(245, 158, 11, var(--gradient-opacity));
+    --accent-color: rgba(234, 179, 8, var(--gradient-opacity));
+  }
+
+  html, body {
+    height: 100%;
+    overscroll-behavior: none;
+  }
+
+  body {
+    font-family: 'Inter', "Microsoft YaHei", "PingFang SC", -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', 'Segoe UI', system-ui, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'liga' 1, 'calt' 1;
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Electron 无框窗口拖拽区域（macOS 红绿灯所在的顶部条） */
+  body.electron-app::before {
+    content: '';
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 28px;
+    -webkit-app-region: drag;
+    z-index: 9999;
+    pointer-events: auto;
+  }
+
+  /* 确保顶部区域内的交互元素可点击 */
+  body.electron-app button,
+  body.electron-app a,
+  body.electron-app input,
+  body.electron-app select,
+  body.electron-app textarea,
+  body.electron-app [role="button"] {
+    -webkit-app-region: no-drag;
+  }
+
+  /* Electron自定义标题栏适配 */
+  body.electron-custom-titlebar-active {
+    /* preload.js会自动添加paddingTop，这里确保不被覆盖 */
+    padding-top: var(--electron-titlebar-height, 40px) !important;
+  }
+
+  /* 自定义标题栏模式下不需要 CSS 拖拽条（preload.js 自己处理） */
+  body.electron-custom-titlebar-active::before {
+    display: none !important;
+  }
+
+  /* 重写所有h-screen类，在Electron环境下减去标题栏高度 */
+  body.electron-custom-titlebar-active .h-screen {
+    height: calc(100vh - var(--electron-titlebar-height, 40px)) !important;
+  }
+
+  /* 重写min-h-screen类 */
+  body.electron-custom-titlebar-active .min-h-screen {
+    min-height: calc(100vh - var(--electron-titlebar-height, 40px)) !important;
+  }
+
+  /* 调整sticky元素的top值，避免被标题栏遮挡 */
+  body.electron-custom-titlebar-active header[class*="sticky"] {
+    top: 0 !important;
+    /* sticky元素会相对于已有的padding定位，所以不需要额外偏移 */
+  }
+
+  body.electron-custom-titlebar-active [class*="fixed"] {
+    /* 如果有fixed定位的元素，需要加上标题栏高度 */
+    margin-top: var(--electron-titlebar-height, 40px);
+  }
+  
+  /* Light mode overrides */
+  :root.light {
+    --bolt-bg-primary: #ffffff;
+    --bolt-bg-secondary: #f9fafb;
+    --bolt-bg-tertiary: #f3f4f6;
+    --bolt-border-color: rgba(139, 92, 246, 0.15);
+    --bolt-text-primary: #111827;
+    --bolt-text-secondary: #6b7280;
+    --bolt-text-tertiary: #9ca3af;
+  }
+
+  html.theme-preload,
+  html.theme-preload * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@layer components {
+  /* macOS-style glassmorphism */
+  .glass {
+    background: rgba(255, 255, 255, 0.0);
+    backdrop-filter: blur(5px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+  /* 亮色模式下 .glass 内的所有 slate 颜色强制为深色 */
+  :root:not(.dark):not(.spring) .glass :is(
+    .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400,
+    .text-slate-500, .text-slate-600, .text-slate-700, .text-slate-800,
+    .text-gray-300, .text-gray-400, .text-gray-500, .text-gray-600, .text-gray-700
+  ) {
+    color: #0f172a !important;
+  }
+  :is(.dark .glass) {
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  :is(.spring .glass) {
+    background: rgba(139, 0, 0, 0.65);
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    position: relative;
+  }
+  .glass-card {
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transition: transform 0.2s ease, background 0.2s ease;
+  }
+  /* 亮色模式下 .glass-card 内的所有 slate 颜色强制为深色 */
+  :root:not(.dark):not(.spring) .glass-card :is(
+    .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400,
+    .text-slate-500, .text-slate-600, .text-slate-700, .text-slate-800,
+    .text-gray-300, .text-gray-400, .text-gray-500, .text-gray-600, .text-gray-700
+  ) {
+    color: #0f172a !important;
+  }
+  :is(.dark .glass-card) {
+    background: rgba(30, 41, 59, 0.00);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  :is(.spring .glass-card) {
+    background: rgba(153, 0, 0, 0.5);
+    border: 1px solid rgba(255, 215, 0, 0.15);
+  }
+  .glass-card:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+  :is(.dark .glass-card:hover) {
+     background: rgba(30, 41, 59, 0.00);
+  }
+  :is(.spring .glass-card:hover) {
+    background: rgba(153, 0, 0, 0.65);
+  }
+
+  /* Spring theme 福字 watermark overlay */
+  .spring .glass::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url('/fu.svg');
+    background-repeat: repeat;
+    background-size: 120px 120px;
+    opacity: 0.6;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .spring .glass > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* 竖排文字 */
+  .writing-vertical-rl {
+    writing-mode: vertical-rl;
+  }
+
+  /* Modern gradient modal background with subtle pattern */
+  .modal-backdrop {
+    background: 
+      radial-gradient(circle at 20% 20%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(255, 119, 198, 0.3) 0%, transparent 50%),
+      radial-gradient(circle at 40% 40%, rgba(120, 219, 255, 0.2) 0%, transparent 50%),
+      linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+  }
+  
+  .modal-content {
+    @apply bg-white rounded-2xl shadow-2xl border border-gray-100;
+    background: 
+      radial-gradient(circle at 100% 0%, rgba(120, 119, 198, 0.05) 0%, transparent 50%),
+      radial-gradient(circle at 0% 100%, rgba(255, 119, 198, 0.05) 0%, transparent 50%),
+      white;
+  }
+
+  /* Enhance prose readability in light mode */
+  .prose {
+    --tw-prose-body: #1e293b;
+    --tw-prose-headings: #0f172a;
+    --tw-prose-links: var(--primary-hex);
+    --tw-prose-bold: #0f172a;
+    --tw-prose-counters: #374151;
+    --tw-prose-bullets: #6b7280;
+    --tw-prose-hr: #e5e7eb;
+    --tw-prose-quotes: #0f172a;
+    --tw-prose-quote-borders: #e5e7eb;
+    --tw-prose-captions: #374151;
+    --tw-prose-code: #0f172a;
+    --tw-prose-pre-code: #e5e7eb;
+    --tw-prose-pre-bg: #1f2937;
+    --tw-prose-th-borders: #d1d5db;
+    --tw-prose-td-borders: #e5e7eb;
+  }
+}
+
+@layer utilities {
+  /* Bolt.diy style color variables */
+  :root {
+    --gradient-opacity: 0.8;
+    --primary-color: rgba(139, 92, 246, var(--gradient-opacity));
+    --primary-hex: #8b5cf6;
+    --secondary-color: rgba(236, 72, 153, var(--gradient-opacity));
+    --accent-color: rgba(59, 130, 246, var(--gradient-opacity));
+    --bolt-bg-primary: #0c0a14;
+    --bolt-bg-secondary: #15111e;
+    --bolt-bg-tertiary: #1e1a2a;
+    --bolt-border-color: rgba(139, 92, 246, 0.2);
+    --bolt-text-primary: #e5e2ff;
+    --bolt-text-secondary: #a8a4ce;
+    --bolt-text-tertiary: #6b6685;
+  }
+
+  /* Primary color utility classes */
+  .btn-primary {
+    background-color: var(--primary-hex);
+    color: white;
+  }
+  .btn-primary:hover {
+    filter: brightness(0.9);
+  }
+  .border-primary {
+    border-color: var(--primary-hex);
+  }
+  .ring-primary {
+    --tw-ring-color: var(--primary-hex);
+  }
+  .bg-primary-subtle {
+    background-color: color-mix(in srgb, var(--primary-hex) 10%, transparent);
+  }
+  .text-primary {
+    color: var(--primary-hex);
+  }
+
+  /* Ray container and animations for Bolt.diy style background */
+  .ray-container {
+    --ray-color-primary: color-mix(in srgb, var(--primary-color), transparent 30%);
+    --ray-color-secondary: color-mix(in srgb, var(--secondary-color), transparent 30%);
+    --ray-color-accent: color-mix(in srgb, var(--accent-color), transparent 30%);
+    --ray-gradient-primary: radial-gradient(var(--ray-color-primary) 0%, transparent 70%);
+    --ray-gradient-secondary: radial-gradient(var(--ray-color-secondary) 0%, transparent 70%);
+    --ray-gradient-accent: radial-gradient(var(--ray-color-accent) 0%, transparent 70%);
+
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    animation: fadeIn 1.5s ease-out;
+    pointer-events: none;
+    z-index: 0;
+    mix-blend-mode: screen;
+  }
+
+  .light-ray {
+    position: absolute;
+    border-radius: 100%;
+    mix-blend-mode: screen;
+  }
+
+  .ray-1 {
+    width: 600px;
+    height: 800px;
+    background: var(--ray-gradient-primary);
+    transform: rotate(65deg);
+    top: -500px;
+    left: -100px;
+    filter: blur(80px);
+    opacity: 0.6;
+    animation: float1 15s infinite ease-in-out;
+  }
+
+  .ray-2 {
+    width: 400px;
+    height: 600px;
+    background: var(--ray-gradient-secondary);
+    transform: rotate(-30deg);
+    top: -300px;
+    left: 200px;
+    filter: blur(60px);
+    opacity: 0.6;
+    animation: float2 18s infinite ease-in-out;
+  }
+
+  .ray-3 {
+    width: 500px;
+    height: 400px;
+    background: var(--ray-gradient-accent);
+    top: -320px;
+    left: 500px;
+    filter: blur(65px);
+    opacity: 0.5;
+    animation: float3 20s infinite ease-in-out;
+  }
+
+  .ray-4 {
+    width: 400px;
+    height: 450px;
+    background: var(--ray-gradient-secondary);
+    top: -350px;
+    left: 800px;
+    filter: blur(55px);
+    opacity: 0.55;
+    animation: float4 17s infinite ease-in-out;
+  }
+
+  .ray-5 {
+    width: 350px;
+    height: 500px;
+    background: var(--ray-gradient-primary);
+    transform: rotate(-45deg);
+    top: -250px;
+    left: 1000px;
+    filter: blur(45px);
+    opacity: 0.6;
+    animation: float5 16s infinite ease-in-out;
+  }
+
+  .ray-6 {
+    width: 300px;
+    height: 700px;
+    background: var(--ray-gradient-accent);
+    transform: rotate(75deg);
+    top: -400px;
+    left: 600px;
+    filter: blur(75px);
+    opacity: 0.45;
+    animation: float6 19s infinite ease-in-out;
+  }
+
+  .ray-7 {
+    width: 450px;
+    height: 600px;
+    background: var(--ray-gradient-primary);
+    transform: rotate(45deg);
+    top: -450px;
+    left: 350px;
+    filter: blur(65px);
+    opacity: 0.55;
+    animation: float7 21s infinite ease-in-out;
+  }
+
+  .ray-8 {
+    width: 380px;
+    height: 550px;
+    background: var(--ray-gradient-secondary);
+    transform: rotate(-60deg);
+    top: -380px;
+    left: 750px;
+    filter: blur(58px);
+    opacity: 0.6;
+    animation: float8 14s infinite ease-in-out;
+  }
+
+  @keyframes float1 {
+    0%, 100% { transform: rotate(65deg) translate(0, 0); }
+    25% { transform: rotate(70deg) translate(30px, 20px); }
+    50% { transform: rotate(60deg) translate(-20px, 40px); }
+    75% { transform: rotate(68deg) translate(-40px, 10px); }
+  }
+
+  @keyframes float2 {
+    0%, 100% { transform: rotate(-30deg) scale(1); }
+    33% { transform: rotate(-25deg) scale(1.1); }
+    66% { transform: rotate(-35deg) scale(0.95); }
+  }
+
+  @keyframes float3 {
+    0%, 100% { transform: translate(0, 0) rotate(0deg); }
+    25% { transform: translate(40px, 20px) rotate(5deg); }
+    75% { transform: translate(-30px, 40px) rotate(-5deg); }
+  }
+
+  @keyframes float4 {
+    0%, 100% { transform: scale(1) rotate(0deg); }
+    50% { transform: scale(1.15) rotate(10deg); }
+  }
+
+  @keyframes float5 {
+    0%, 100% { transform: rotate(-45deg) translate(0, 0); }
+    33% { transform: rotate(-40deg) translate(25px, -20px); }
+    66% { transform: rotate(-50deg) translate(-25px, 20px); }
+  }
+
+  @keyframes float6 {
+    0%, 100% { transform: rotate(75deg) scale(1); filter: blur(75px); }
+    50% { transform: rotate(85deg) scale(1.1); filter: blur(65px); }
+  }
+
+  @keyframes float7 {
+    0%, 100% { transform: rotate(45deg) translate(0, 0); opacity: 0.55; }
+    50% { transform: rotate(40deg) translate(-30px, 30px); opacity: 0.65; }
+  }
+
+  @keyframes float8 {
+    0%, 100% { transform: rotate(-60deg) scale(1); }
+    25% { transform: rotate(-55deg) scale(1.05); }
+    75% { transform: rotate(-65deg) scale(0.95); }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
+
+/* ═══════════════ Background Animation Keyframes (Ken Burns Effect) ═══════════════ */
+/* Ken Burns 变体1: 从左上角缓慢放大移动到右下角 */
+@keyframes kenBurns1 {
+  0% {
+    transform: scale(1) translate(0, 0);
+  }
+  100% {
+    transform: scale(1.15) translate(-3%, -3%);
+  }
+}
+
+/* Ken Burns 变体2: 从右下角缓慢放大移动到左上角 */
+@keyframes kenBurns2 {
+  0% {
+    transform: scale(1.1) translate(-2%, -2%);
+  }
+  100% {
+    transform: scale(1) translate(0, 0);
+  }
+}
+
+/* Ken Burns 变体3: 从中心缓慢放大 */
+@keyframes kenBurns3 {
+  0% {
+    transform: scale(1.05);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1.05);
+  }
+}
+
+/* Ken Burns 变体4: 缓慢平移 + 轻微缩放 */
+@keyframes kenBurns4 {
+  0% {
+    transform: scale(1) translate(0, 0);
+  }
+  33% {
+    transform: scale(1.08) translate(-2%, 1%);
+  }
+  66% {
+    transform: scale(1.12) translate(1%, -2%);
+  }
+  100% {
+    transform: scale(1) translate(0, 0);
+  }
+}
+
+/* 漂浮效果: 缓慢左右上下移动 */
+@keyframes bgFloat {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(-2%, 1%);
+  }
+  50% {
+    transform: translate(1%, -1%);
+  }
+  75% {
+    transform: translate(-1%, 2%);
+  }
+}
+
+/* 呼吸效果: 缓慢缩放 */
+@keyframes bgPulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+/* 缩小效果 */
+@keyframes bgZoomOut {
+  0% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* 渐变背景动态效果 */
+@keyframes gradientShift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Spring Festival theme — remap blue accent colors to gold/amber */
+.spring .bg-blue-500 { background-color: #b91c1c !important; }
+.spring .bg-blue-50 { background-color: rgba(153, 27, 27, 0.15) !important; }
+.spring .bg-blue-100 { background-color: rgba(153, 27, 27, 0.25) !important; }
+.spring .from-blue-50 { --tw-gradient-from: rgba(153, 27, 27, 0.15) !important; }
+.spring .to-indigo-50 { --tw-gradient-to: rgba(120, 53, 15, 0.15) !important; }
+.spring .from-blue-500\/10 { --tw-gradient-from: rgba(185, 28, 28, 0.1) !important; }
+.spring .to-indigo-500\/10 { --tw-gradient-to: rgba(120, 53, 15, 0.1) !important; }
+.spring .border-blue-200 { border-color: rgba(245, 158, 11, 0.3) !important; }
+.spring .border-blue-100 { border-color: rgba(245, 158, 11, 0.2) !important; }
+.spring .border-blue-500 { border-color: #f59e0b !important; }
+.spring .border-blue-500\/20 { border-color: rgba(245, 158, 11, 0.2) !important; }
+.spring .ring-blue-500\/30 { --tw-ring-color: rgba(245, 158, 11, 0.3) !important; }
+.spring .text-blue-300 { color: #fcd34d !important; }
+.spring .text-blue-400 { color: #fbbf24 !important; }
+.spring .text-blue-500 { color: #f59e0b !important; }
+.spring .text-blue-600 { color: #d97706 !important; }
+.spring .text-blue-700 { color: #fbbf24 !important; }
+.spring .text-blue-800 { color: #fcd34d !important; }
+.spring .hover\:text-blue-300:hover { color: #fde68a !important; }
+.spring .hover\:text-blue-600:hover { color: #f59e0b !important; }
+.spring .hover\:text-blue-700:hover { color: #fbbf24 !important; }
+.spring .hover\:text-blue-800:hover { color: #fcd34d !important; }
+.spring .text-blue-300\/80 { color: rgba(252, 211, 77, 0.8) !important; }
+.spring .text-blue-400\/70 { color: rgba(251, 191, 36, 0.7) !important; }
+.spring .text-blue-600\/70 { color: rgba(217, 119, 6, 0.7) !important; }
+.spring .text-blue-700\/80 { color: rgba(251, 191, 36, 0.8) !important; }
+.spring .bg-blue-500\/10 { background-color: rgba(185, 28, 28, 0.1) !important; }
+.spring .bg-blue-500\/20 { background-color: rgba(185, 28, 28, 0.2) !important; }
+.spring .bg-blue-50 { background-color: rgba(153, 27, 27, 0.15) !important; }
+.spring .shadow-blue-500\/20 { --tw-shadow-color: rgba(245, 158, 11, 0.2) !important; }
+.spring .hover\:bg-blue-600:hover { background-color: #b91c1c !important; }
+.spring .bg-primary { background-color: #dc2626 !important; }
+.spring .text-primary { color: #fbbf24 !important; }
+.spring .border-primary\/20 { border-color: rgba(251, 191, 36, 0.2) !important; }
+.spring .hover\:bg-primary\/5:hover { background-color: rgba(251, 191, 36, 0.05) !important; }
+.spring .text-indigo-500 { color: #f59e0b !important; }
+.spring .text-sky-500 { color: #fbbf24 !important; }
+
+/* Spring theme — remap dark slate/gray backgrounds to deep red */
+.spring .dark\:bg-slate-800 { background-color: rgba(120, 15, 15, 0.7) !important; }
+.spring .dark\:bg-slate-800\/60 { background-color: rgba(120, 15, 15, 0.6) !important; }
+.spring .dark\:bg-\[rgba\(30\,41\,59\,0\.7\)\] { background-color: rgba(100, 10, 10, 0.7) !important; }
+.spring .dark\:bg-\[rgba\(30\,41\,59\,0\.6\)\] { background-color: rgba(100, 10, 10, 0.6) !important; }
+.spring .dark\:from-\[\#0f172a\]\/90 { --tw-gradient-from: rgba(80, 5, 5, 0.9) !important; }
+.spring .dark\:via-\[\#0f172a\]\/60 { --tw-gradient-via: rgba(80, 5, 5, 0.6) !important; }
+.spring .dark\:bg-gray-700\/50 { background-color: rgba(120, 15, 15, 0.5) !important; }
+.spring .dark\:bg-gray-600 { background-color: rgba(140, 20, 20, 0.8) !important; }
+.spring .dark\:hover\:bg-gray-600\/50:hover { background-color: rgba(140, 20, 20, 0.5) !important; }
+.spring .dark\:border-gray-600 { border-color: rgba(220, 38, 38, 0.3) !important; }
+.spring .dark\:bg-white\/5 { background-color: rgba(255, 200, 150, 0.08) !important; }
+.spring .dark\:bg-white\/10 { background-color: rgba(255, 200, 150, 0.12) !important; }
+.spring .bg-white\/10 { background-color: rgba(255, 200, 150, 0.1) !important; }
+.spring .bg-black\/10 { background-color: rgba(80, 5, 5, 0.15) !important; }
+
+/* Spring theme — remap gray panel backgrounds to deep red tones */
+.spring .bg-gray-50 { background-color: rgba(80, 5, 5, 0.9) !important; }
+.spring .dark\:bg-gray-900 { background-color: rgba(60, 0, 0, 0.95) !important; }
+.spring .bg-white { background-color: rgba(100, 10, 10, 0.85) !important; }
+.spring .dark\:bg-gray-800 { background-color: rgba(90, 8, 8, 0.85) !important; }
+.spring .bg-gray-100 { background-color: rgba(120, 15, 15, 0.6) !important; }
+.spring .dark\:bg-gray-700 { background-color: rgba(110, 12, 12, 0.7) !important; }
+.spring .bg-gray-200 { background-color: rgba(140, 20, 20, 0.5) !important; }
+.spring .hover\:bg-gray-100:hover { background-color: rgba(120, 15, 15, 0.6) !important; }
+.spring .hover\:bg-gray-200:hover { background-color: rgba(140, 20, 20, 0.5) !important; }
+.spring .dark\:hover\:bg-gray-700:hover { background-color: rgba(110, 12, 12, 0.7) !important; }
+.spring .dark\:hover\:bg-gray-600:hover { background-color: rgba(130, 18, 18, 0.6) !important; }
+.spring .border-gray-200 { border-color: rgba(220, 38, 38, 0.25) !important; }
+.spring .border-gray-300 { border-color: rgba(220, 38, 38, 0.3) !important; }
+.spring .border-gray-400 { border-color: rgba(220, 38, 38, 0.35) !important; }
+.spring .dark\:border-gray-600 { border-color: rgba(255, 215, 0, 0.15) !important; }
+.spring .dark\:border-gray-700 { border-color: rgba(255, 215, 0, 0.12) !important; }
+.spring .text-gray-500 { color: #fca5a5 !important; }
+.spring .text-gray-600 { color: #fecaca !important; }
+.spring .text-gray-700 { color: #fee2e2 !important; }
+.spring .dark\:text-gray-300 { color: #fecaca !important; }
+.spring .dark\:text-gray-400 { color: #fca5a5 !important; }
+.spring .text-gray-900 { color: #fff1f2 !important; }
+.spring .dark\:text-gray-100 { color: #fff1f2 !important; }
+.spring .dark\:text-gray-200 { color: #ffe4e6 !important; }
+.spring .dark\:bg-gray-600 { background-color: rgba(130, 18, 18, 0.6) !important; }
+.spring .dark\:\[\&_code\]\:bg-gray-700 code { background-color: rgba(110, 12, 12, 0.7) !important; }
+.spring .dark\:\[\&_pre\]\:bg-gray-700 pre { background-color: rgba(110, 12, 12, 0.7) !important; }
+.spring .bg-gray-800 { background-color: rgba(90, 8, 8, 0.85) !important; }
+.spring .dark\:bg-gray-200 { background-color: rgba(220, 38, 38, 0.8) !important; }
+.spring .hover\:bg-gray-900:hover { background-color: rgba(70, 5, 5, 0.9) !important; }
+.spring .dark\:hover\:bg-white:hover { background-color: rgba(220, 38, 38, 0.9) !important; }
+
+/* Slim mode responsive layout - backup for non-JS scenarios */
+@media (max-width: 500px) {
+  /* Hide home page suggestions area in slim mode */
+  .home-suggestions-area {
+    display: none !important;
+  }
+}

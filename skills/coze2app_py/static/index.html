@@ -1,0 +1,1252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coze Manager</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: #FAFAFA;
+            color: #1A1A1A;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 顶栏 */
+        .topbar {
+            background: #fff;
+            border-bottom: 1px solid #E0E0E0;
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .topbar h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #000;
+            min-width: 180px;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+
+        .topbar h1 .subtitle {
+            font-size: 14px;
+            font-weight: 400;
+            color: #666;
+        }
+
+        .topbar-token {
+            flex: 1;
+            max-width: 600px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .topbar-token input {
+            flex: 1;
+            border: 1px solid #E0E0E0;
+            border-radius: 0;
+            padding: 9px 12px;
+            font-size: 14px;
+            outline: none;
+            background: #fff;
+            color: #1A1A1A;
+        }
+
+        .topbar-token input:focus {
+            border-color: #000;
+            border-width: 2px;
+            padding: 8px 11px;
+        }
+
+        .topbar-token input:disabled {
+            background: #F5F5F5;
+            color: #666;
+        }
+
+        button {
+            background: #000;
+            color: #fff;
+            border: none;
+            border-radius: 0;
+            padding: 9px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        button:hover { background: #333; }
+        button:disabled { background: #ccc; cursor: not-allowed; opacity: 0.6; }
+
+        .btn-secondary { background: #666; }
+        .btn-secondary:hover { background: #888; }
+
+        .btn-danger { background: #666; }
+        .btn-danger:hover { background: #888; }
+
+        .hidden { display: none !important; }
+
+        /* 主容器 */
+        .main-container {
+            display: flex;
+            height: calc(100vh - 52px);
+        }
+
+        /* 左侧面板 */
+        .left-panel {
+            width: 50%;
+            background: #fff;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .left-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .left-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .workspace-list {
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .workspace-item {
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .workspace-header {
+            padding: 14px 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.15s;
+        }
+
+        .workspace-header:hover {
+            background: #F5F5F5;
+        }
+
+        .workspace-icon {
+            font-size: 12px;
+            color: #1A1A1A;
+            font-weight: 600;
+        }
+
+        .workspace-name {
+            flex: 1;
+            font-weight: 600;
+            font-size: 14px;
+            color: #1A1A1A;
+        }
+
+        .workspace-badge {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .workspace-content {
+            display: none;
+            background: #FAFAFA;
+        }
+
+        .workspace-content.active {
+            display: block;
+        }
+
+        .resource-section {
+            padding: 16px 20px;
+        }
+
+        .resource-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1A1A1A;
+            margin-bottom: 12px;
+        }
+
+        .resource-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 8px;
+        }
+
+        .resource-card {
+            background: #fff;
+            border: 1px solid #E0E0E0;
+            border-radius: 0;
+            padding: 16px 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .resource-card:hover {
+            border-color: #666;
+            border-width: 2px;
+            padding: 15px 11px;
+        }
+
+        .resource-card.active {
+            border-color: #000;
+            border-width: 2px;
+            padding: 15px 11px;
+            background: #fff;
+        }
+
+        .resource-icon {
+            width: 36px;
+            height: 36px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            object-fit: cover;
+        }
+
+        .resource-card-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: #1A1A1A;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            width: 100%;
+        }
+
+        .loading {
+            padding: 20px;
+            text-align: center;
+            color: #999;
+        }
+
+        .empty {
+            padding: 40px 20px;
+            text-align: center;
+            color: #999;
+        }
+
+        /* 右侧面板 */
+        .right-panel {
+            width: 50%;
+            background: #fff;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .chat-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .chat-subtitle {
+            font-size: 13px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .message {
+            margin-bottom: 16px;
+        }
+
+        .message-user {
+            text-align: right;
+        }
+
+        .message-content {
+            display: inline-block;
+            max-width: 70%;
+            padding: 10px 14px;
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .message-user .message-content {
+            background: #1A1A1A;
+            color: #fff;
+            text-align: left;
+            border-radius: 0;
+        }
+
+        .message-assistant .message-content {
+            background: #fff;
+            color: #1A1A1A;
+            border: 1px solid #E0E0E0;
+            border-radius: 0;
+        }
+
+        .chat-input {
+            border-top: 1px solid #e0e0e0;
+            padding: 20px;
+            background: #fff;
+        }
+
+        .chat-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+            max-width: 100%;
+        }
+
+        .chat-input-main {
+            flex: 1;
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            border: 1px solid #E0E0E0;
+            border-radius: 12px;
+            padding: 8px 12px;
+            background: #fff;
+            transition: border-color 0.15s;
+        }
+
+        .chat-input-main:focus-within {
+            border-color: #000;
+        }
+
+        .chat-input textarea {
+            flex: 1;
+            border: none;
+            resize: none;
+            padding: 0;
+            font-size: 14px;
+            line-height: 1.5;
+            outline: none;
+            background: transparent;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-input-btn {
+            background: transparent;
+            border: none;
+            color: #666;
+            padding: 4px;
+            font-size: 20px;
+            cursor: pointer;
+            transition: color 0.15s;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            align-self: flex-end;
+            line-height: 1;
+        }
+
+        .file-input-btn:hover {
+            color: #000;
+        }
+
+        .file-input-btn:disabled {
+            color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .send-btn {
+            background: #000;
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            padding: 0;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.15s;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+
+        .send-btn:hover {
+            background: #333;
+        }
+
+        .send-btn:disabled {
+            background: #E0E0E0;
+            color: #999;
+            cursor: not-allowed;
+        }
+
+        .file-previews {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .file-preview {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #fff;
+            border: 1px solid #E0E0E0;
+            border-radius: 0;
+            padding: 4px 8px;
+            font-size: 13px;
+            color: #1A1A1A;
+        }
+
+        .file-preview-remove {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            padding: 0;
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .file-preview-remove:hover {
+            color: #000;
+        }
+
+        .placeholder-text {
+            color: #999;
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        /* 帮助按钮 */
+        .help-btn {
+            background: #fff;
+            border: 1px solid #E0E0E0;
+            color: #1A1A1A;
+            padding: 9px 16px;
+            min-width: 80px;
+        }
+
+        .help-btn:hover {
+            background: #F5F5F5;
+            border-color: #666;
+        }
+
+        /* 模态框 */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.hidden {
+            display: none;
+        }
+
+        .modal-content {
+            background: #fff;
+            border: 2px solid #000;
+            max-width: 600px;
+            width: 90%;
+            margin: 20px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #E0E0E0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #000;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 28px;
+            line-height: 1;
+            color: #666;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+        }
+
+        .modal-close:hover {
+            color: #000;
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        .help-step {
+            padding: 16px;
+            margin-bottom: 16px;
+            border-left: 3px solid #000;
+            background: #F5F5F5;
+        }
+
+        .help-step h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #000;
+            margin-bottom: 8px;
+        }
+
+        .help-step p {
+            font-size: 13px;
+            color: #1A1A1A;
+            line-height: 1.6;
+        }
+
+        .help-step a {
+            color: #000;
+            text-decoration: underline;
+            font-weight: 500;
+        }
+
+        .help-step a:hover {
+            color: #333;
+        }
+
+        .help-tip {
+            padding: 12px;
+            background: #FAFAFA;
+            border: 1px solid #E0E0E0;
+            font-size: 12px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid #E0E0E0;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        /* 消息提示 */
+        .message-tip {
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            border-left: 3px solid #000;
+            background: #F5F5F5;
+            color: #1A1A1A;
+        }
+
+        .message-tip.error {
+            border-left-color: #666;
+            background: #F5F5F5;
+        }
+
+        .message-tip.success {
+            border-left-color: #000;
+            background: #F5F5F5;
+        }
+
+        /* 响应式 */
+        @media (max-width: 1200px) {
+            .resource-grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            }
+        }
+
+        @media (max-width: 768px) {
+            .left-panel, .right-panel {
+                width: 100%;
+            }
+            .left-panel {
+                display: none;
+            }
+            .left-panel.mobile-show {
+                display: flex;
+            }
+            .resource-grid {
+                grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 顶栏 -->
+    <div class="topbar">
+        <h1>
+            <span>Coze2App</span>
+            <span class="subtitle">让 coze 工作流一键变网站</span>
+        </h1>
+        <div class="topbar-token">
+            <input type="password" id="tokenInput" placeholder="请输入 Personal Access Token (PAT)">
+            <button id="submitTokenBtn" onclick="submitToken()">验证Token</button>
+            <button class="help-btn" id="helpBtn" onclick="showHelp()">配置指南</button>
+            <button class="btn-danger hidden" id="clearTokenBtn" onclick="clearToken()">清除</button>
+        </div>
+    </div>
+
+    <!-- 帮助模态框 -->
+    <div class="modal-overlay hidden" id="helpModal" onclick="hideHelp()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>Token 配置指南</h2>
+                <button class="modal-close" onclick="hideHelp()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="help-step">
+                    <h3>第一步：打开 Coze 平台</h3>
+                    <p>访问：<a href="https://code.coze.cn/playground" target="_blank" rel="noopener noreferrer">https://code.coze.cn/playground</a></p>
+                </div>
+
+                <div class="help-step">
+                    <h3>第二步：登录账号</h3>
+                    <p>使用您的账号登录 Coze 平台</p>
+                </div>
+
+                <div class="help-step">
+                    <h3>第三步：获取令牌</h3>
+                    <p>进入后台后，点击 <strong>授权 → 服务身份及凭证 → 添加</strong>，勾选 <strong>所有空间</strong> 和 <strong>所有权限</strong>，确认后复制令牌，填入输入框即可。</p>
+                </div>
+
+                <div class="help-tip">
+                    <strong>提示：</strong>令牌具有您账号的完整权限，请妥善保管，不要泄露给他人。
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="hideHelp()">我知道了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主容器 -->
+    <div class="main-container">
+        <!-- 左侧面板 -->
+        <div class="left-panel" id="leftPanel">
+            <div class="left-header">
+                <h2>工作空间与资源</h2>
+                <span id="workspaceCount" style="font-size:13px;color:#999;"></span>
+            </div>
+            <div class="workspace-list" id="workspaceList">
+                <div class="placeholder-text">请先配置Token</div>
+            </div>
+        </div>
+
+        <!-- 右侧面板 -->
+        <div class="right-panel" id="rightPanel">
+            <div class="chat-header">
+                <div class="chat-title" id="chatTitle">选择Bot或工作流开始</div>
+                <div class="chat-subtitle" id="chatSubtitle"></div>
+            </div>
+            <div class="chat-messages" id="chatMessages">
+                <div class="placeholder-text">👈 请从左侧选择Bot或工作流</div>
+            </div>
+            <div class="chat-input">
+                <div class="file-previews" id="filePreviews"></div>
+                <div class="chat-input-row">
+                    <div class="chat-input-main">
+                        <input type="file" id="fileInput" multiple style="display: none;"
+                               onchange="handleFileSelect(event)" accept="*/*">
+                        <button class="file-input-btn" onclick="document.getElementById('fileInput').click()"
+                                id="fileBtn" disabled title="添加文件">+</button>
+                        <textarea id="messageInput" placeholder="输入消息..." rows="3"
+                                  onkeypress="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); }" disabled></textarea>
+                    </div>
+                    <button class="send-btn" onclick="sendMessage()" id="sendBtn" disabled title="发送">↑</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局状态
+        let currentResource = null;  // {type: 'bot'|'workflow', id: '', name: '', workspaceId: ''}
+        let conversationId = null;
+        let workspacesData = {};  // {workspaceId: {bots: [], workflows: []}}
+        let accessToken = null;
+        let selectedFiles = [];  // 选中的文件对象
+        let uploadedFileIds = [];  // 已上传的文件ID
+
+        // 页面加载
+        window.onload = function() {
+            checkTokenStatus();
+        };
+
+        // 检查Token状态
+        async function checkTokenStatus() {
+            try {
+                const response = await fetch('/api/auth/status');
+                const data = await response.json();
+                if (data.configured) {
+                    accessToken = true;
+                    const tokenInput = document.getElementById('tokenInput');
+                    tokenInput.type = 'text';
+                    tokenInput.value = 'sat_●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●';
+                    tokenInput.disabled = true;
+                    tokenInput.readOnly = true;
+                    document.getElementById('submitTokenBtn').classList.add('hidden');
+                    document.getElementById('clearTokenBtn').classList.remove('hidden');
+                    await loadWorkspaces();
+                }
+            } catch (error) {
+                console.error('检查Token状态失败:', error);
+            }
+        }
+
+        // 提交Token (Enter 键触发)
+        document.addEventListener('DOMContentLoaded', function() {
+            const tokenInput = document.getElementById('tokenInput');
+            tokenInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    submitToken();
+                }
+            });
+        });
+
+        // 显示帮助
+        function showHelp() {
+            document.getElementById('helpModal').classList.remove('hidden');
+        }
+
+        // 隐藏帮助
+        function hideHelp() {
+            document.getElementById('helpModal').classList.add('hidden');
+        }
+
+        // 提交Token
+        async function submitToken() {
+            const token = document.getElementById('tokenInput').value.trim();
+            if (!token) {
+                alert('请输入Token');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/config/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    accessToken = token;
+                    const tokenInput = document.getElementById('tokenInput');
+                    tokenInput.type = 'text';
+                    tokenInput.value = 'sat_●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●';
+                    tokenInput.disabled = true;
+                    tokenInput.readOnly = true;
+                    document.getElementById('submitTokenBtn').classList.add('hidden');
+                    document.getElementById('clearTokenBtn').classList.remove('hidden');
+                    await loadWorkspaces();
+                } else {
+                    alert(data.error || 'Token验证失败');
+                }
+            } catch (error) {
+                alert('Token验证失败: ' + error.message);
+            }
+        }
+
+        // 清除Token
+        async function clearToken() {
+            if (!confirm('确定要清除Token吗？')) return;
+            try {
+                await fetch('/api/auth/clear', { method: 'POST' });
+                location.reload();
+            } catch (error) {
+                alert('清除失败: ' + error.message);
+            }
+        }
+
+        // 加载工作空间列表
+        async function loadWorkspaces() {
+            const container = document.getElementById('workspaceList');
+            container.innerHTML = '<div class="loading">⏳ 加载工作空间...</div>';
+
+            try {
+                const response = await fetch('/api/workspaces');
+                const result = await response.json();
+
+                if (response.ok && result.data) {
+                    const workspaces = result.data.workspaces || [];
+                    document.getElementById('workspaceCount').textContent = `${workspaces.length}个工作空间`;
+
+                    if (workspaces.length === 0) {
+                        container.innerHTML = '<div class="empty">没有可用的工作空间</div>';
+                        return;
+                    }
+
+                    container.innerHTML = '';
+                    workspaces.forEach((ws, index) => {
+                        const item = createWorkspaceItem(ws);
+                        container.appendChild(item);
+                        // 自动展开第一个
+                        if (index === 0) {
+                            toggleWorkspace(ws.id);
+                        }
+                    });
+                } else {
+                    container.innerHTML = `<div class="empty">加载失败: ${result.error || '未知错误'}</div>`;
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="empty">加载失败: ${error.message}</div>`;
+            }
+        }
+
+        // 创建工作空间项
+        function createWorkspaceItem(workspace) {
+            const item = document.createElement('div');
+            item.className = 'workspace-item';
+            item.innerHTML = `
+                <div class="workspace-header" onclick="toggleWorkspace('${workspace.id}')">
+                    <span class="workspace-icon" id="icon-${workspace.id}">▶</span>
+                    <span class="workspace-name">${workspace.name}</span>
+                    <span class="workspace-badge" id="badge-${workspace.id}"></span>
+                </div>
+                <div class="workspace-content" id="content-${workspace.id}"></div>
+            `;
+            return item;
+        }
+
+        // 切换工作空间展开/折叠
+        async function toggleWorkspace(workspaceId) {
+            const content = document.getElementById(`content-${workspaceId}`);
+            const icon = document.getElementById(`icon-${workspaceId}`);
+
+            if (content.classList.contains('active')) {
+                content.classList.remove('active');
+                icon.textContent = '▶';
+            } else {
+                content.classList.add('active');
+                icon.textContent = '▼';
+
+                // 如果还没加载数据,则加载
+                if (!workspacesData[workspaceId]) {
+                    await loadWorkspaceResources(workspaceId);
+                }
+            }
+        }
+
+        // 加载工作空间的Bot和工作流
+        async function loadWorkspaceResources(workspaceId) {
+            const content = document.getElementById(`content-${workspaceId}`);
+            const badge = document.getElementById(`badge-${workspaceId}`);
+
+            content.innerHTML = '<div class="loading">⏳ 加载中...</div>';
+
+            try {
+                // 配置workspace_id
+                await fetch('/api/config/space_id', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ space_id: workspaceId })
+                });
+
+                // 并发加载Bot和工作流
+                const [botsRes, workflowsRes] = await Promise.all([
+                    fetch('/api/bots'),
+                    fetch('/api/workflows')
+                ]);
+
+                const botsData = await botsRes.json();
+                const workflowsData = await workflowsRes.json();
+
+                const bots = botsData.code === 0 ? (botsData.data?.items || []) : [];
+                const workflows = workflowsData.code === 0 ? (workflowsData.data?.items || []) : [];
+
+                workspacesData[workspaceId] = { bots, workflows };
+                badge.textContent = `${bots.length + workflows.length}个资源`;
+
+                // 渲染资源
+                renderWorkspaceResources(workspaceId, bots, workflows);
+            } catch (error) {
+                content.innerHTML = `<div class="empty">加载失败: ${error.message}</div>`;
+            }
+        }
+
+        // 渲染工作空间资源
+        function renderWorkspaceResources(workspaceId, bots, workflows) {
+            const content = document.getElementById(`content-${workspaceId}`);
+            let html = '';
+
+            if (bots.length > 0) {
+                html += `
+                    <div class="resource-section">
+                        <div class="resource-title">Bot (${bots.length})</div>
+                        <div class="resource-grid">
+                            ${bots.map(bot => {
+                                const iconUrl = bot.icon_url || bot.icon || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="%23E0E0E0"/></svg>';
+                                return `
+                                    <div class="resource-card" onclick="selectResource('bot', '${bot.id}', '${escapeHtml(bot.name)}', '${workspaceId}')">
+                                        <img class="resource-icon" src="${iconUrl}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2240%22 fill=%22%23E0E0E0%22/></svg>'">
+                                        <div class="resource-card-name">${escapeHtml(bot.name)}</div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (workflows.length > 0) {
+                html += `
+                    <div class="resource-section">
+                        <div class="resource-title">工作流 (${workflows.length})</div>
+                        <div class="resource-grid">
+                            ${workflows.map(wf => {
+                                const wfId = wf.workflow_id || wf.id;
+                                const wfName = wf.workflow_name || wf.name || '未命名';
+                                const iconUrl = wf.icon_url || wf.icon || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="20" y="20" width="60" height="60" fill="%23E0E0E0"/></svg>';
+                                return `
+                                    <div class="resource-card" onclick="selectResource('workflow', '${wfId}', '${escapeHtml(wfName)}', '${workspaceId}')">
+                                        <img class="resource-icon" src="${iconUrl}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect x=%2220%22 y=%2220%22 width=%2260%22 height=%2260%22 fill=%22%23E0E0E0%22/></svg>'">
+                                        <div class="resource-card-name">${escapeHtml(wfName)}</div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (bots.length === 0 && workflows.length === 0) {
+                html = '<div class="empty">该工作空间没有可用的资源</div>';
+            }
+
+            content.innerHTML = html;
+        }
+
+        // 选择资源
+        function selectResource(type, id, name, workspaceId) {
+            // 清除之前的选中状态
+            document.querySelectorAll('.resource-card').forEach(card => {
+                card.classList.remove('active');
+            });
+
+            // 设置新选中状态
+            event.currentTarget.classList.add('active');
+
+            currentResource = { type, id, name, workspaceId };
+            conversationId = null;
+
+            // 清空之前的文件
+            selectedFiles = [];
+            uploadedFileIds = [];
+            updateFilePreviews();
+
+            document.getElementById('chatTitle').textContent = name;
+            document.getElementById('chatSubtitle').textContent = type === 'bot' ? 'Bot 对话' : '工作流执行';
+            document.getElementById('chatMessages').innerHTML = '<div class="placeholder-text">请输入消息开始对话或执行工作流</div>';
+            document.getElementById('messageInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('fileBtn').disabled = false;
+            document.getElementById('messageInput').focus();
+        }
+
+        // 文件选择处理
+        async function handleFileSelect(event) {
+            const files = Array.from(event.target.files);
+            if (files.length === 0) return;
+
+            for (const file of files) {
+                // 上传文件
+                const fileId = await uploadFile(file);
+                if (fileId) {
+                    selectedFiles.push({
+                        name: file.name,
+                        size: file.size,
+                        id: fileId
+                    });
+                    uploadedFileIds.push(fileId);
+                }
+            }
+
+            // 更新文件预览
+            updateFilePreviews();
+            // 清空input以允许重复选择
+            event.target.value = '';
+        }
+
+        // 上传文件到Coze
+        async function uploadFile(file) {
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch('/api/files/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (response.ok && data.data) {
+                    console.log('文件上传成功:', file.name, '-> ID:', data.data.id);
+                    return data.data.id;
+                } else {
+                    addMessage('assistant', `❌ 文件上传失败: ${file.name} - ${data.error || '未知错误'}`);
+                    return null;
+                }
+            } catch (error) {
+                addMessage('assistant', `❌ 文件上传失败: ${file.name} - ${error.message}`);
+                return null;
+            }
+        }
+
+        // 更新文件预览
+        function updateFilePreviews() {
+            const container = document.getElementById('filePreviews');
+            if (selectedFiles.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            container.innerHTML = selectedFiles.map((file, index) => {
+                const sizeKB = (file.size / 1024).toFixed(1);
+                return `
+                    <div class="file-preview">
+                        ${escapeHtml(file.name)} (${sizeKB}KB)
+                        <button class="file-preview-remove" onclick="removeFile(${index})"
+                                title="移除文件">×</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 移除文件
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            uploadedFileIds.splice(index, 1);
+            updateFilePreviews();
+        }
+
+        // 发送消息
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            if (!message || !currentResource) return;
+
+            input.value = '';
+
+            // 显示用户消息和附件
+            let displayMessage = message;
+            if (selectedFiles.length > 0) {
+                displayMessage += '\n\n附件: ' + selectedFiles.map(f => f.name).join(', ');
+            }
+            addMessage('user', displayMessage);
+
+            // 发送消息
+            if (currentResource.type === 'bot') {
+                await sendBotMessage(message, uploadedFileIds);
+            } else {
+                await executeWorkflow(message, uploadedFileIds);
+            }
+
+            // 清空文件
+            selectedFiles = [];
+            uploadedFileIds = [];
+            updateFilePreviews();
+        }
+
+        // Bot对话（流式）
+        async function sendBotMessage(message, fileIds = []) {
+            try {
+                const response = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bot_id: currentResource.id,
+                        message: message,
+                        conversation_id: conversationId,
+                        file_ids: fileIds
+                    })
+                });
+
+                if (!response.ok) {
+                    addMessage('assistant', `❌ 错误: ${response.statusText}`);
+                    return;
+                }
+
+                // 创建一个新的助手消息元素用于流式更新
+                const assistantMsgDiv = document.createElement('div');
+                assistantMsgDiv.className = 'message message-assistant';
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                contentDiv.textContent = '正在思考...';  // 显示加载状态
+                contentDiv.style.color = '#999';  // 灰色提示
+                assistantMsgDiv.appendChild(contentDiv);
+                document.getElementById('chatMessages').appendChild(assistantMsgDiv);
+                scrollToBottom();
+
+                // 解析SSE流
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let reply = '';
+                let currentEvent = null;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // 保留最后一个不完整的行
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+
+                        if (line.startsWith('event:')) {
+                            currentEvent = line.substring(6).trim();
+                        } else if (line.startsWith('data:')) {
+                            try {
+                                const dataStr = line.substring(5).trim();
+                                const eventData = JSON.parse(dataStr);
+
+                                // 保存conversation_id
+                                if (eventData.conversation_id) {
+                                    conversationId = eventData.conversation_id;
+                                }
+
+                                // 流式追加内容
+                                if (currentEvent === 'conversation.message.delta') {
+                                    if (eventData.role === 'assistant' && eventData.type === 'answer') {
+                                        // 收到第一个内容时，清除"正在思考..."并恢复颜色
+                                        if (reply === '') {
+                                            contentDiv.style.color = '';
+                                        }
+
+                                        const content = eventData.content || '';
+                                        reply += content;
+                                        contentDiv.textContent = reply;
+                                        scrollToBottom();
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('Parse SSE error:', e, line);
+                            }
+                        }
+                    }
+                }
+
+                // 确保最终内容显示
+                if (reply) {
+                    contentDiv.textContent = reply;
+                } else {
+                    contentDiv.textContent = '(无回复内容)';
+                }
+
+            } catch (error) {
+                addMessage('assistant', `❌ 发送失败: ${error.message}`);
+            }
+        }
+
+        // 滚动到底部
+        function scrollToBottom() {
+            const messages = document.getElementById('chatMessages');
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        // 执行工作流
+        async function executeWorkflow(message, fileIds = []) {
+            try {
+                let parameters = {};
+                try {
+                    const parsed = JSON.parse(message);
+                    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                        parameters = parsed;
+                    } else {
+                        parameters = { input: String(message) };
+                    }
+                } catch {
+                    parameters = { input: String(message) };
+                }
+
+                const response = await fetch('/api/workflow/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        workflow_id: currentResource.id,
+                        parameters: parameters,
+                        file_ids: fileIds
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    let output = '';
+                    try {
+                        const workflowData = JSON.parse(result.data);
+                        output = workflowData.data || result.data;
+                    } catch {
+                        output = result.data;
+                    }
+                    addMessage('assistant', `✅ 执行成功\n\n${output}`);
+                } else {
+                    const errorMsg = result.msg || result.error || '执行失败';
+                    const debugUrl = result.debug_url ? `\n\n调试: ${result.debug_url}` : '';
+                    addMessage('assistant', `❌ 错误 (${result.code})\n${errorMsg}${debugUrl}`);
+                }
+            } catch (error) {
+                addMessage('assistant', `❌ 执行失败: ${error.message}`);
+            }
+        }
+
+        // 添加消息
+        function addMessage(role, content) {
+            const messagesDiv = document.getElementById('chatMessages');
+            if (messagesDiv.querySelector('.placeholder-text')) {
+                messagesDiv.innerHTML = '';
+            }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message message-${role}`;
+            messageDiv.innerHTML = `<div class="message-content">${escapeHtml(content)}</div>`;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // HTML转义
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

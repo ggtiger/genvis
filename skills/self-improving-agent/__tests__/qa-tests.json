@@ -1,0 +1,162 @@
+{
+  "skillName": "self-improving-agent",
+  "version": "1.0.5",
+  "generatedAt": "2025-02-18T08:30:00Z",
+  "testCases": [
+    {
+      "id": "TC-001",
+      "type": "script",
+      "category": "positive",
+      "description": "测试脚本 --help 参数显示",
+      "script": "./scripts/extract-skill.sh --help",
+      "expectedBehavior": {
+        "exitCode": 0,
+        "outputContains": ["Usage:", "skill-name", "--dry-run", "Examples:"]
+      },
+      "validation": "检查帮助信息完整显示"
+    },
+    {
+      "id": "TC-002",
+      "type": "script",
+      "category": "positive",
+      "description": "测试脚本 --dry-run 参数",
+      "script": "./scripts/extract-skill.sh test-skill --dry-run",
+      "expectedBehavior": {
+        "exitCode": 0,
+        "outputContains": ["Dry run", "would create:", "Template content", "name: test-skill"]
+      },
+      "validation": "检查dry-run模式不创建文件，仅显示预览"
+    },
+    {
+      "id": "TC-003",
+      "type": "script",
+      "category": "negative",
+      "description": "测试无参数时提示错误",
+      "script": "./scripts/extract-skill.sh",
+      "expectedBehavior": {
+        "exitCode": 1,
+        "outputContains": ["ERROR", "Skill name is required", "Usage:"]
+      },
+      "validation": "检查缺少skill name参数时正确报错"
+    },
+    {
+      "id": "TC-004",
+      "type": "script",
+      "category": "negative",
+      "description": "测试无效skill name格式（大写字母）",
+      "script": "./scripts/extract-skill.sh TestSkill",
+      "expectedBehavior": {
+        "exitCode": 1,
+        "outputContains": ["ERROR", "Invalid skill name format", "lowercase"]
+      },
+      "validation": "检查验证skill name格式规则"
+    },
+    {
+      "id": "TC-005",
+      "type": "script",
+      "category": "negative",
+      "description": "测试无效skill name格式（包含特殊字符）",
+      "script": "./scripts/extract-skill.sh test_skill",
+      "expectedBehavior": {
+        "exitCode": 1,
+        "outputContains": ["ERROR", "Invalid skill name format"]
+      },
+      "validation": "检查拒绝下划线等无效字符"
+    },
+    {
+      "id": "TC-006",
+      "type": "script",
+      "category": "negative",
+      "description": "测试有效skill name格式（小写+连字符）",
+      "script": "./scripts/extract-skill.sh valid-skill-name-123 --dry-run",
+      "expectedBehavior": {
+        "exitCode": 0,
+        "outputContains": ["name: valid-skill-name-123"]
+      },
+      "validation": "检查接受符合格式的skill name"
+    },
+    {
+      "id": "TC-007",
+      "type": "script",
+      "category": "negative",
+      "description": "测试无效选项参数",
+      "script": "./scripts/extract-skill.sh test --invalid-option",
+      "expectedBehavior": {
+        "exitCode": 1,
+        "outputContains": ["ERROR", "Unknown option"]
+      },
+      "validation": "检查处理未知参数"
+    },
+    {
+      "id": "TC-008",
+      "type": "file_structure",
+      "category": "positive",
+      "description": "验证 .learnings 目录结构",
+      "check": "file_exists",
+      "files": [
+        ".learnings/LEARNINGS.md",
+        ".learnings/ERRORS.md",
+        ".learnings/FEATURE_REQUESTS.md"
+      ],
+      "expectedBehavior": {
+        "allFilesExist": true
+      },
+      "validation": "检查必需的学习记录文件存在"
+    },
+    {
+      "id": "TC-009",
+      "type": "file_structure",
+      "category": "positive",
+      "description": "验证脚本文件可执行权限",
+      "check": "executable",
+      "files": [
+        "scripts/extract-skill.sh"
+      ],
+      "expectedBehavior": {
+        "allExecutable": true
+      },
+      "validation": "检查脚本有执行权限"
+    },
+    {
+      "id": "TC-010",
+      "type": "file_content",
+      "category": "positive",
+      "description": "验证 SKILL.md 必需字段",
+      "check": "frontmatter",
+      "file": "SKILL.md",
+      "requiredFields": ["name", "displayName", "description"],
+      "expectedBehavior": {
+        "allFieldsPresent": true
+      },
+      "validation": "检查SKILL.md包含YAML frontmatter元数据"
+    },
+    {
+      "id": "TC-011",
+      "type": "script",
+      "category": "positive",
+      "description": "测试创建新skill（实际创建，需cleanup）",
+      "script": "./scripts/extract-skill.sh qa-test-skill-temp --output-dir /tmp/skills-qa-test",
+      "expectedBehavior": {
+        "exitCode": 0,
+        "outputContains": ["Creating skill", "Created:", "Next steps:"],
+        "fileCreated": "/tmp/skills-qa-test/qa-test-skill-temp/SKILL.md"
+      },
+      "cleanup": "rm -rf /tmp/skills-qa-test",
+      "validation": "实际创建skill目录和SKILL.md文件"
+    },
+    {
+      "id": "TC-012",
+      "type": "script",
+      "category": "negative",
+      "description": "测试重复创建同名skill",
+      "script": "./scripts/extract-skill.sh duplicate-test --output-dir /tmp/skills-qa-test-dup",
+      "setup": "mkdir -p /tmp/skills-qa-test-dup/duplicate-test && echo 'test' > /tmp/skills-qa-test-dup/duplicate-test/SKILL.md",
+      "expectedBehavior": {
+        "exitCode": 1,
+        "outputContains": ["ERROR", "already exists"]
+      },
+      "cleanup": "rm -rf /tmp/skills-qa-test-dup",
+      "validation": "拒绝覆盖已存在的skill目录"
+    }
+  ]
+}

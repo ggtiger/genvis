@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loading...</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ===== Default (Dark) Theme ===== */
+  :root {
+    --bg: #0a0e1a;
+    --bg-gradient: radial-gradient(ellipse at center, #0f172a 0%, #0a0e1a 60%, #020617 100%);
+    --text: #f3f4f6;
+    --accent1: #38bdf8;
+    --accent2: #22d3ee;
+    --accent1-rgb: 56, 189, 248;
+    --accent2-rgb: 34, 211, 238;
+    --ring-glow: rgba(56, 189, 248, 0.5);
+    --ring2-glow: rgba(34, 211, 238, 0.4);
+    --logo-shadow: 0 0 24px rgba(80, 200, 220, 0.4);
+    --name-gradient: linear-gradient(135deg, #e5e7eb 0%, #38bdf8 50%, #22d3ee 100%);
+    --progress-track: rgba(255, 255, 255, 0.04);
+    --progress-gradient: linear-gradient(90deg, transparent, #38bdf8, #22d3ee, transparent);
+    --progress-glow-color: rgba(56, 189, 248, 0.4);
+    --status: rgba(107, 114, 128, 0.8);
+    --version: rgba(156, 163, 175, 0.6);
+    --bottom-line: rgba(56, 189, 248, 0.3);
+    --top-line: transparent;
+  }
+
+  /* ===== Light Theme ===== */
+  body.light {
+    --bg: #f0f4f8;
+    --bg-gradient: radial-gradient(ellipse at center, #f8fafc 0%, #f0f4f8 60%, #e2e8f0 100%);
+    --text: #1e293b;
+    --accent1: #38bdf8;
+    --accent2: #22d3ee;
+    --accent1-rgb: 56, 189, 248;
+    --accent2-rgb: 34, 211, 238;
+    --ring-glow: rgba(56, 189, 248, 0.5);
+    --ring2-glow: rgba(34, 211, 238, 0.4);
+    --logo-shadow: 0 0 24px rgba(80, 200, 220, 0.3);
+    --name-gradient: linear-gradient(135deg, #334155 0%, #0284c7 50%, #0891b2 100%);
+    --progress-track: rgba(0, 0, 0, 0.06);
+    --progress-gradient: linear-gradient(90deg, transparent, #38bdf8, #22d3ee, transparent);
+    --progress-glow-color: rgba(56, 189, 248, 0.3);
+    --status: rgba(100, 116, 139, 0.8);
+    --version: rgba(100, 116, 139, 0.6);
+    --bottom-line: rgba(56, 189, 248, 0.4);
+    --top-line: transparent;
+  }
+
+  /* ===== Spring Festival Theme ===== */
+  body.spring {
+    --bg: #1a0000;
+    --bg-gradient: radial-gradient(ellipse at center, #2d0a0a 0%, #1a0000 60%, #0d0000 100%);
+    --text: #fef3c7;
+    --accent1: #fbbf24;
+    --accent2: #dc2626;
+    --accent1-rgb: 251, 191, 36;
+    --accent2-rgb: 220, 38, 38;
+    --ring-glow: rgba(251, 191, 36, 0.5);
+    --ring2-glow: rgba(220, 38, 38, 0.4);
+    --logo-shadow: 0 0 30px rgba(220, 38, 38, 0.6), 0 0 60px rgba(251, 191, 36, 0.2);
+    --name-gradient: linear-gradient(135deg, #fde68a 0%, #fbbf24 40%, #f59e0b 60%, #fde68a 100%);
+    --progress-track: rgba(251, 191, 36, 0.1);
+    --progress-gradient: linear-gradient(90deg, transparent, #fbbf24, #f59e0b, transparent);
+    --progress-glow-color: rgba(251, 191, 36, 0.5);
+    --status: rgba(254, 243, 199, 0.7);
+    --version: rgba(254, 243, 199, 0.5);
+    --bottom-line: rgba(251, 191, 36, 0.4);
+    --top-line: linear-gradient(90deg, transparent, rgba(220,38,38,0.5), rgba(251,191,36,0.5), rgba(220,38,38,0.5), transparent);
+  }
+
+  body {
+    background: var(--bg-gradient);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    overflow: hidden;
+    -webkit-app-region: drag;
+    user-select: none;
+    border-radius: 12px;
+    position: relative;
+  }
+
+  canvas#particles {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .glow-bg {
+    position: absolute;
+    width: 300px; height: 300px;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.15;
+    z-index: 0;
+    animation: glowPulse 4s ease-in-out infinite alternate;
+  }
+  .glow-bg.g1 { top: -60px; left: -40px; background: var(--accent1); }
+  .glow-bg.g2 { bottom: -80px; right: -60px; background: var(--accent2); animation-delay: 2s; }
+  body.spring .glow-bg { opacity: 0.2; }
+
+  .content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .logo-wrap {
+    position: relative;
+    width: 100px; height: 100px;
+    margin-bottom: 24px;
+  }
+
+  .logo-ring {
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: var(--accent1);
+    border-right-color: rgba(var(--accent1-rgb), 0.3);
+    animation: spin 2s linear infinite;
+    filter: drop-shadow(0 0 6px var(--ring-glow));
+  }
+  .logo-ring.ring2 {
+    inset: -16px;
+    border-top-color: var(--accent2);
+    border-right-color: rgba(var(--accent2-rgb), 0.2);
+    animation: spinReverse 3s linear infinite;
+    filter: drop-shadow(0 0 6px var(--ring2-glow));
+    opacity: 0.6;
+  }
+
+  .logo-icon {
+    width: 100%; height: 100%;
+    animation: fadeInScale 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    position: relative;
+    z-index: 1;
+    border-radius: 50%;
+    overflow: hidden;
+    box-shadow: var(--logo-shadow);
+  }
+  .logo-icon img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .pulse-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--accent1-rgb), 0.3);
+    animation: pulseExpand 2s ease-out infinite;
+  }
+  .pulse-ring:nth-child(2) { animation-delay: 0.6s; }
+  .pulse-ring:nth-child(3) { animation-delay: 1.2s; }
+
+  /* Spring-only: horse emoji */
+  .horse-emoji {
+    display: none;
+    font-size: 28px;
+    margin-bottom: 8px;
+    animation: fadeInUp 0.6s ease-out 0.1s both;
+    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.6));
+  }
+  body.spring .horse-emoji { display: block; }
+
+  .app-name {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    background: var(--name-gradient);
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: fadeInUp 0.7s ease-out 0.2s both, gradientShift 4s ease-in-out infinite;
+    margin-bottom: 6px;
+  }
+
+  .app-version {
+    font-size: 11px;
+    color: var(--version);
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+    animation: fadeInUp 0.7s ease-out 0.35s both;
+  }
+
+  /* Spring-only: blessing section */
+  .blessing {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 28px;
+    animation: fadeInUp 0.8s ease-out 0.45s both;
+  }
+  body.spring .blessing { display: flex; }
+  /* Non-spring: extra spacing */
+  body:not(.spring) .app-version { margin-bottom: 36px; }
+
+  .blessing-main {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: #fbbf24;
+    text-shadow: 0 0 12px rgba(251, 191, 36, 0.5);
+  }
+  .blessing-sub {
+    font-size: 13px;
+    letter-spacing: 3px;
+    color: #fde68a;
+    opacity: 0.85;
+  }
+  .blessing-slogan {
+    font-size: 13px;
+    letter-spacing: 2px;
+    color: #fbbf24;
+    opacity: 0.9;
+    margin-top: 2px;
+  }
+
+  .progress-wrap {
+    width: 200px;
+    animation: fadeInUp 0.7s ease-out 0.6s both;
+  }
+  .progress-track {
+    width: 100%;
+    height: 2px;
+    background: var(--progress-track);
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 30%;
+    background: var(--progress-gradient);
+    border-radius: 2px;
+    animation: progressSlide 2s ease-in-out infinite;
+  }
+  .progress-glow {
+    position: absolute;
+    top: -4px;
+    height: 10px;
+    width: 60px;
+    background: radial-gradient(ellipse, var(--progress-glow-color), transparent);
+    border-radius: 50%;
+    animation: progressSlide 2s ease-in-out infinite;
+    filter: blur(2px);
+  }
+
+  .status-text {
+    margin-top: 14px;
+    font-size: 11px;
+    color: var(--status);
+    animation: fadeInUp 0.7s ease-out 0.75s both;
+    letter-spacing: 0.5px;
+  }
+
+  .bottom-line {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--bottom-line), var(--bottom-line), transparent);
+    z-index: 1;
+  }
+  .top-line {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--top-line);
+    z-index: 1;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes spinReverse { to { transform: rotate(-360deg); } }
+  @keyframes fadeInScale {
+    from { opacity: 0; transform: scale(0.6); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pulseExpand {
+    0%   { transform: scale(1); opacity: 0.6; }
+    100% { transform: scale(2.2); opacity: 0; }
+  }
+  @keyframes glowPulse {
+    from { opacity: 0.1; transform: scale(0.9); }
+    to   { opacity: 0.2; transform: scale(1.1); }
+  }
+  @keyframes gradientShift {
+    0%, 100% { background-position: 0% 50%; }
+    50%      { background-position: 100% 50%; }
+  }
+  @keyframes progressSlide {
+    0%   { transform: translateX(-300%); }
+    100% { transform: translateX(800%); }
+  }
+</style>
+</head>
+<body>
+  <div class="top-line"></div>
+  <div class="glow-bg g1"></div>
+  <div class="glow-bg g2"></div>
+  <canvas id="particles"></canvas>
+
+  <div class="content">
+    <div class="logo-wrap">
+      <div class="logo-ring"></div>
+      <div class="logo-ring ring2"></div>
+      <div class="pulse-ring"></div>
+      <div class="pulse-ring"></div>
+      <div class="pulse-ring"></div>
+      <div class="logo-icon">
+        <img id="app-logo" alt="Logo">
+      </div>
+    </div>
+
+    <div class="horse-emoji">🐴</div>
+    <div class="app-name">G.E.N.V.I.S</div>
+    <div class="app-version">预览版</div>
+
+    <div class="blessing">
+      <span class="blessing-main">马年吉祥</span>
+      <span class="blessing-sub">新春快乐</span>
+      <span class="blessing-slogan">喝了古20 · 天天好心情</span>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="progress-track">
+        <div class="progress-fill"></div>
+        <div class="progress-glow"></div>
+      </div>
+    </div>
+    <div class="status-text">正在启动服务...</div>
+  </div>
+
+  <div class="bottom-line"></div>
+
+  <script>
+    const canvas = document.getElementById('particles');
+    const ctx = canvas.getContext('2d');
+    let w, h, particles = [];
+
+    function resize() {
+      w = canvas.width = canvas.offsetWidth * devicePixelRatio;
+      h = canvas.height = canvas.offsetHeight * devicePixelRatio;
+      ctx.scale(devicePixelRatio, devicePixelRatio);
+    }
+    resize();
+
+    const isSpring = document.body.classList.contains('spring');
+    const isLight = document.body.classList.contains('light');
+
+    // Particle colors based on theme
+    const defaultColors = isLight
+      ? ['rgba(2, 132, 199,', 'rgba(8, 145, 178,']
+      : ['rgba(56, 189, 248,', 'rgba(34, 211, 238,'];
+    const springColors = [
+      'rgba(251, 191, 36,', 'rgba(245, 158, 11,',
+      'rgba(220, 38, 38,', 'rgba(239, 68, 68,', 'rgba(253, 230, 138,',
+    ];
+    const colors = isSpring ? springColors : defaultColors;
+
+    const lineColorStr = isSpring
+      ? 'rgba(251, 191, 36,'
+      : isLight ? 'rgba(8, 145, 178,' : 'rgba(34, 211, 238,';
+
+    class Particle {
+      constructor() { this.reset(); }
+      reset() {
+        this.x = Math.random() * (w / devicePixelRatio);
+        this.y = Math.random() * (h / devicePixelRatio);
+        this.size = Math.random() * (isSpring ? 2 : 1.5) + 0.5;
+        this.speedX = (Math.random() - 0.5) * 0.3;
+        this.speedY = (Math.random() - 0.5) * 0.3 + (isSpring ? -0.1 : 0);
+        this.opacity = Math.random() * 0.5 + 0.1;
+        this.fadeSpeed = Math.random() * 0.005 + 0.002;
+        this.growing = Math.random() > 0.5;
+        this.color = colors[Math.floor(Math.random() * colors.length)];
+      }
+      update() {
+        this.x += this.speedX;
+        this.y += this.speedY;
+        this.opacity += this.growing ? this.fadeSpeed : -this.fadeSpeed;
+        if (this.opacity >= 0.6) this.growing = false;
+        if (this.opacity <= 0.05) this.growing = true;
+        const W = w / devicePixelRatio, H = h / devicePixelRatio;
+        if (this.x < -10 || this.x > W + 10 || this.y < -10 || this.y > H + 10) this.reset();
+      }
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `${this.color} ${this.opacity})`;
+        ctx.fill();
+      }
+    }
+
+    for (let i = 0; i < (isSpring ? 60 : 50); i++) particles.push(new Particle());
+
+    function drawLines() {
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 80) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = `${lineColorStr} ${0.08 * (1 - dist / 80)})`;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    function animate() {
+      ctx.clearRect(0, 0, w / devicePixelRatio, h / devicePixelRatio);
+      particles.forEach(p => { p.update(); p.draw(); });
+      drawLines();
+      requestAnimationFrame(animate);
+    }
+    animate();
+  </script>
+</body>
+</html>

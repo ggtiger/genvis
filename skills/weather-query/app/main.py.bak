@@ -1,0 +1,231 @@
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic_settings import BaseSettings
+import httpx
+from typing import Optional
+import logging
+from pathlib import Path
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+class Settings(BaseSettings):
+    openweather_api_key: str
+
+    class Config:
+        env_file = ".env"
+
+
+settings = Settings()
+
+app = FastAPI(title="Weather Query Skill")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# OpenWeatherMap API endpoints
+OPENWEATHER_GEO_API = "http://api.openweathermap.org/geo/1.0/direct"
+OPENWEATHER_WEATHER_API = "https://api.openweathermap.org/data/3.0/onecall"
+
+
+async def get_client_ip(request: Request) -> str:
+    """Get client IP address from request"""
+    # Check for forwarded headers (common in proxy/load balancer setups)
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+
+    return request.client.host if request.client else "127.0.0.1"
+
+
+async def get_city_by_ip(ip: str) -> Optional[str]:
+    """Get city name from IP address using ip-api.com (free, no key needed)"""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"http://ip-api.com/json/{ip}")
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("status") == "success":
+                    city = data.get("city", "")
+                    country = data.get("country", "")
+                    # For Chinese cities, return city name directly
+                    if country == "China":
+                        return city
+                    # For international cities, return format: "City, Country"
+                    return f"{city}, {country}" if city else None
+    except Exception as e:
+        logger.error(f"Error getting city by IP: {e}")
+    return None
+
+
+async def get_city_coordinates(city_name: str) -> Optional[tuple]:
+    """Get city coordinates (lat, lon) from city name using OpenWeatherMap GeoAPI"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            params = {
+                "q": city_name,
+                "appid": settings.openweather_api_key,
+                "limit": 1
+            }
+            response = await client.get(OPENWEATHER_GEO_API, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if data and len(data) > 0:
+                    lat = data[0].get("lat")
+                    lon = data[0].get("lon")
+                    if lat is not None and lon is not None:
+                        return (lat, lon)
+    except Exception as e:
+        logger.error(f"Error getting city coordinates: {e}")
+    return None
+
+
+async def get_weather_by_coordinates(lat: float, lon: float) -> Optional[dict]:
+    """Get weather information by coordinates using OpenWeatherMap Current Weather API"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            params = {
+                "lat": lat,
+                "lon": lon,
+                "appid": settings.openweather_api_key,
+                "units": "metric",
+                "lang": "zh_cn"
+            }
+            # Use current weather API (free tier)
+            response = await client.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params=params
+            )
+            if response.status_code == 200:
+                data = response.json()
+                main = data.get("main", {})
+                weather = data.get("weather", [{}])[0]
+                wind = data.get("wind", {})
+                return {
+                    "temperature": float(main.get("temp", 0)),
+                    "condition": weather.get("description", "Unknown").capitalize(),
+                    "humidity": int(main.get("humidity", 0)),
+                    "windDirection": get_wind_direction(wind.get("deg", 0)),
+                    "windSpeed": float(wind.get("speed", 0))
+                }
+    except Exception as e:
+        logger.error(f"Error getting weather by coordinates: {e}")
+    return None
+
+
+def get_wind_direction(degree: int) -> str:
+    """Convert wind degree to direction string"""
+    directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                  "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    index = round(degree / 22.5) % 16
+    return directions[index]
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "ok"}
+
+
+@app.get("/")
+async def root():
+    """Serve index.html"""
+    index_path = Path(__file__).parent.parent / "static" / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return {"message": "Weather Query API"}
+
+
+@app.get("/api/weather/current")
+async def get_current_weather(request: Request):
+    """
+    Get current weather based on client IP location
+    Automatically detects user's city from IP address
+    """
+    try:
+        # Get client IP
+        client_ip = await get_client_ip(request)
+        logger.info(f"Client IP: {client_ip}")
+
+        # Get city from IP
+        city = await get_city_by_ip(client_ip)
+        if not city:
+            # Fallback to Beijing if IP location fails
+            logger.warning(f"Failed to get city from IP {client_ip}, using Beijing as fallback")
+            city = "Beijing"
+
+        logger.info(f"Detected city: {city}")
+
+        # Get city coordinates for OpenWeatherMap API
+        coords = await get_city_coordinates(city)
+        if not coords:
+            raise HTTPException(status_code=404, detail=f"City '{city}' not found")
+
+        # Get weather data
+        weather = await get_weather_by_coordinates(coords[0], coords[1])
+        if not weather:
+            raise HTTPException(status_code=500, detail="Failed to fetch weather data")
+
+        # Add city name to response
+        weather["city"] = city
+
+        return weather
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_current_weather: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/by-city")
+async def get_weather_by_city(city: str):
+    """
+    Get weather for a specific city
+    Parameter: city - city name (e.g., Beijing, Shanghai, Guangzhou, Hefei)
+    """
+    try:
+        if not city:
+            raise HTTPException(status_code=400, detail="City parameter is required")
+
+        logger.info(f"Fetching weather for city: {city}")
+
+        # Get city coordinates
+        coords = await get_city_coordinates(city)
+        if not coords:
+            raise HTTPException(status_code=404, detail=f"City '{city}' not found")
+
+        # Get weather data
+        weather = await get_weather_by_coordinates(coords[0], coords[1])
+        if not weather:
+            raise HTTPException(status_code=500, detail="Failed to fetch weather data")
+
+        # Add city name to response
+        weather["city"] = city
+
+        return weather
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_weather_by_city: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
