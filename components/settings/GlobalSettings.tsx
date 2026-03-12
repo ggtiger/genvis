@@ -488,7 +488,7 @@ export default function GlobalSettings({ isOpen, onClose, initialTab = 'ai-agent
           </div>
 
           {/* Right Content Area */}
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="glass flex-1 flex flex-col min-w-0 dark:border-white/10 bg-white/50 dark:bg-white/[0.03]">
 
           {/* Tab Content */}
           <div className="flex-1 p-6 overflow-y-auto scrollbar-thin scrollbar-thumb-white/30 scrollbar-track-transparent">
