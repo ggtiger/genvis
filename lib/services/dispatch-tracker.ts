@@ -23,7 +23,7 @@ function getSecretaryStream(): SecretaryStreamManager {
   return secretaryStream;
 }
 
-const POLL_INTERVAL = 8_000; // 8 秒轮询一次
+const POLL_INTERVAL = 20_000; // 20 秒轮询一次（降低 CPU）
 const FEEDBACK_TIMEOUT_MS = 30 * 60 * 1000; // 30 分钟超时
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
@@ -176,7 +176,6 @@ const trackedDispatches = _state.trackedDispatches;
  */
 export function trackDispatch(info: TrackedDispatch): void {
   trackedDispatches.set(info.projectId, info);
-  console.log(`[DispatchTracker] 📥 新任务已注册: projectId=${info.projectId}, employee=${info.employeeName}, source=${info.source}, 当前追踪数=${trackedDispatches.size}`);
   // 确保轮询已启动
   startPolling();
 }
@@ -189,7 +188,6 @@ export function resetFeedbackNotified(projectId: string): void {
   const tracked = trackedDispatches.get(projectId);
   if (tracked) {
     tracked.feedbackNotified = false;
-    console.log(`[DispatchTracker] 🔄 已重置 ${projectId} 的 feedback 通知标记`);
   }
 }
 
@@ -200,12 +198,10 @@ export function resetFeedbackNotified(projectId: string): void {
 export function notifyTaskCompleted(projectId: string): void {
   const tracked = trackedDispatches.get(projectId);
   if (tracked) {
-    console.log(`[DispatchTracker] ⚡ notifyTaskCompleted: ${projectId} (${tracked.employeeName})，立即触发完成处理`);
     handleCompletedTask(projectId, tracked).then(() => {
       trackedDispatches.delete(projectId);
       if (trackedDispatches.size === 0) {
         stopPolling();
-        console.log('[DispatchTracker] 无追踪任务，轮询已暂停');
       }
     }).catch((err: unknown) => {
       console.error(`[DispatchTracker] notifyTaskCompleted 处理失败:`, err);
@@ -216,11 +212,9 @@ export function notifyTaskCompleted(projectId: string): void {
   // 追踪列表中没有，检查是否是秘书调度的任务（projectId 以 dispatch- 开头）
   // dev 模式下 HMR/重启可能导致内存 Map 丢失，需要从数据库恢复
   if (!projectId.startsWith('dispatch-')) {
-    // 非秘书调度的任务（员工列表直接派活），无需通知秘书
     return;
   }
 
-  console.log(`[DispatchTracker] ⚠️ notifyTaskCompleted: ${projectId} 不在追踪列表中，从数据库恢复...`);
   recoverAndHandleCompleted(projectId).catch((err: unknown) => {
     console.error(`[DispatchTracker] 数据库恢复处理失败:`, err);
   });
@@ -241,7 +235,6 @@ async function recoverAndHandleCompleted(projectId: string): Promise<void> {
     .limit(1);
 
   if (!projectRows[0]) {
-    console.log(`[DispatchTracker] ❌ 数据库中未找到项目 ${projectId}`);
     return;
   }
 
@@ -254,8 +247,6 @@ async function recoverAndHandleCompleted(projectId: string): Promise<void> {
     } catch { /* use default */ }
   }
 
-  console.log(`[DispatchTracker] 🔄 从 DB 恢复: ${projectId}, employee=${employeeName}`);
-
   const recovered: TrackedDispatch = {
     projectId,
     employeeName,
@@ -264,7 +255,6 @@ async function recoverAndHandleCompleted(projectId: string): Promise<void> {
   };
 
   await handleCompletedTask(projectId, recovered);
-  console.log(`[DispatchTracker] ✅ 数据库恢复通知完成: ${projectId}`);
 }
 
 /**
@@ -273,7 +263,6 @@ async function recoverAndHandleCompleted(projectId: string): Promise<void> {
 export function startPolling(): void {
   if (_state.pollTimer) return;
   _state.pollTimer = setInterval(pollDispatchStatuses, POLL_INTERVAL);
-  console.log(`[DispatchTracker] 后台轮询已启动, 间隔=${POLL_INTERVAL}ms, 追踪任务数=${trackedDispatches.size}`);
 }
 
 /**
@@ -381,14 +370,11 @@ async function handleCompletedTask(projectId: string, tracked: TrackedDispatch):
 
   console.log(`[DispatchTracker] ✅ handleCompletedTask 完成: ${projectId} (${tracked.employeeName})`);
 }
-
 /**
  * 轮询所有追踪中的 dispatch 任务状态
  */
 async function pollDispatchStatuses(): Promise<void> {
   if (trackedDispatches.size === 0) return;
-
-  console.log(`[DispatchTracker] 🔄 轮询中, 追踪任务数: ${trackedDispatches.size}, 任务IDs: [${Array.from(trackedDispatches.keys()).join(', ')}]`);
 
   try {
     const { db: dbClient } = await import('@/lib/db/client');
@@ -444,8 +430,6 @@ async function pollDispatchStatuses(): Promise<void> {
 
         const status = (latestRequest.status || '').toLowerCase();
 
-        console.log(`[DispatchTracker] 📊 ${projectId} (${tracked.employeeName}): status=${status}, feedbackNotified=${tracked.feedbackNotified}`);
-
         // ========== 判断是否需要用户反馈 ==========
         // 新逻辑：如果不在执行中且未完成，就需要用户反馈
         // 执行中的状态：pending, processing, planning, waiting_approval, implementing, active, running
@@ -465,8 +449,6 @@ async function pollDispatchStatuses(): Promise<void> {
             continue;
           }
           tracked.feedbackNotified = true;
-
-          console.log(`[DispatchTracker] 🔍 检测到需要反馈: ${projectId} (${tracked.employeeName}), status=${status}`);
 
           // Push SSE event for waiting_feedback
           getSecretaryStream().publish({
@@ -503,9 +485,6 @@ async function pollDispatchStatuses(): Promise<void> {
             questionContent = `⚠️ 任务执行遇到问题：${errorMsg}\n\n${questionContent}`;
           }
 
-          console.log(`[DispatchTracker] 📝 反馈问题内容 (前100字): ${(questionContent || '').substring(0, 100)}`);
-          console.log(`[DispatchTracker] 📡 IM 信息: platform=${tracked.imPlatform}, senderId=${tracked.imSenderId}`);
-
           // 检查 IM 用户是否有活跃项目会话
           if (tracked.imPlatform && tracked.imSenderId) {
             const { getConversationContext, switchToProject, enqueuePendingFeedback } = await import('./im/conversation-context');
@@ -520,7 +499,6 @@ async function pollDispatchStatuses(): Promise<void> {
               await pushToIMChannel(questionContent, tracked);
               await appendToSecretarySession(`${switchNotice}\n\n${questionContent}`, tracked);
 
-              console.log(`[DispatchTracker] 🔔 已通知用户切换到 ${tracked.employeeName} 的会话 (waiting_feedback)`);
             } else {
               // 已有活跃项目会话 → 加入 PendingQueue
               await enqueuePendingFeedback(tracked.imPlatform, tracked.imSenderId, {
@@ -532,7 +510,7 @@ async function pollDispatchStatuses(): Promise<void> {
                 imPlatform: tracked.imPlatform,
                 imRawPayload: tracked.imRawPayload,
               });
-              console.log(`[DispatchTracker] 📋 ${tracked.employeeName} 的反馈请求已加入队列`);
+
             }
           }
 
@@ -552,7 +530,7 @@ async function pollDispatchStatuses(): Promise<void> {
         // 任务已完成
         finishedIds.push(projectId);
         await handleCompletedTask(projectId, tracked);
-        console.log(`[DispatchTracker] 任务 ${projectId} ${status}，已通知 (source: ${tracked.source})`);
+        console.log(`[DispatchTracker] 任务 ${projectId} ${status}，已通知`);
       } catch (err) {
         console.error(`[DispatchTracker] 检查任务 ${projectId} 状态失败:`, err);
       }
@@ -566,7 +544,6 @@ async function pollDispatchStatuses(): Promise<void> {
     // 没有追踪任务时停止轮询
     if (trackedDispatches.size === 0) {
       stopPolling();
-      console.log('[DispatchTracker] 无追踪任务，轮询已暂停');
     }
   } catch (err) {
     console.error('[DispatchTracker] 轮询异常:', err);
@@ -651,8 +628,6 @@ async function appendToSecretarySession(
  */
 async function pushToIMChannel(content: string, tracked: TrackedDispatch): Promise<void> {
   try {
-    console.log(`[DispatchTracker] 📤 pushToIMChannel 开始: platform=${tracked.imPlatform}, senderId=${tracked.imSenderId}, content前50字=${content.substring(0, 50)}`);
-
     const { getStreamAdapter } = await import('./im/adapter-factory');
     const { formatReplyForPlatform, splitMessage } = await import('./im/im-formatter');
     const { loadGlobalSettings } = await import('./settings');
@@ -661,21 +636,14 @@ async function pushToIMChannel(content: string, tracked: TrackedDispatch): Promi
     const settings = await loadGlobalSettings();
     const config = settings.im_channels?.[platform];
     if (!config) {
-      console.warn(`[DispatchTracker] IM 配置未找到: ${platform}`);
       return;
     }
-
-    console.log(`[DispatchTracker] 📤 IM 配置已加载: appId=${config.appId}, enabled=${(config as any).enabled}`);
 
     const adapter = await getStreamAdapter(platform);
     const formatted = formatReplyForPlatform(content, platform);
     const chunks = splitMessage(formatted, platform);
 
-    console.log(`[DispatchTracker] 📤 准备发送 ${chunks.length} 条消息到 ${platform}`);
-
-    // 延迟回推不使用 rawPayload（sessionWebhook 可能已过期），强制走 OpenAPI
     for (const chunk of chunks) {
-      console.log(`[DispatchTracker] 📤 发送消息: senderId=${tracked.imSenderId}, chunk前50字=${chunk.substring(0, 50)}`);
       await adapter.sendReply({
         platform,
         conversationId: '',
@@ -683,7 +651,6 @@ async function pushToIMChannel(content: string, tracked: TrackedDispatch): Promi
         content: chunk,
         rawPayload: undefined,
       }, config);
-      console.log(`[DispatchTracker] ✅ 消息发送成功`);
     }
   } catch (err) {
     console.error(`[DispatchTracker] ❌ IM 回推失败 (${tracked.imPlatform}):`, err);

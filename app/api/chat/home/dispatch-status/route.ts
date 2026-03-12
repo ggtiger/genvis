@@ -33,100 +33,92 @@ export async function POST(request: NextRequest) {
 
     const { db: dbClient } = await import('@/lib/db/client');
     const { projects: projectsTable, userRequests, messages: messagesTable } = await import('@/lib/db/schema');
-    const { eq, desc, and } = await import('drizzle-orm');
+    const { eq, desc, and, inArray } = await import('drizzle-orm');
 
-    const results: ProjectStatus[] = [];
+    // Batch query 1: Get all projects at once
+    const projectRows = await dbClient
+      .select({ id: projectsTable.id, name: projectsTable.name })
+      .from(projectsTable)
+      .where(inArray(projectsTable.id, projectIds));
+    const projectMap = new Map(projectRows.map(p => [p.id, p]));
 
-    for (const projectId of projectIds) {
-      try {
-        // Get project name
-        const projectRows = await dbClient
-          .select()
-          .from(projectsTable)
-          .where(eq(projectsTable.id, projectId))
-          .limit(1);
-
-        const project = projectRows[0];
-        if (!project) {
-          results.push({ projectId, status: 'unknown' });
-          continue;
-        }
-
-        // Get the latest user request for this project
-        const requestRows = await dbClient
-          .select()
-          .from(userRequests)
-          .where(eq(userRequests.projectId, projectId))
-          .orderBy(desc(userRequests.createdAt))
-          .limit(1);
-
-        const latestRequest = requestRows[0];
-        if (!latestRequest) {
-          // No requests yet — still pending
-          results.push({
-            projectId,
-            status: 'active',
-            projectName: (project as any).name,
-          });
-          continue;
-        }
-
-        const reqStatus = (latestRequest.status || '').toLowerCase();
-
-        if (reqStatus === 'completed') {
-          // Extract the last assistant message as the result
-          let resultText: string | undefined;
-          try {
-            const lastAssistantMsgs = await dbClient
-              .select({ content: messagesTable.content })
-              .from(messagesTable)
-              .where(
-                and(
-                  eq(messagesTable.projectId, projectId),
-                  eq(messagesTable.role, 'assistant'),
-                  eq(messagesTable.messageType, 'chat')
-                )
-              )
-              .orderBy(desc(messagesTable.createdAt))
-              .limit(1);
-
-            if (lastAssistantMsgs[0]?.content) {
-              resultText = lastAssistantMsgs[0].content;
-              // Truncate very long results
-              if (resultText.length > 2000) {
-                resultText = resultText.slice(0, 2000) + '...';
-              }
-            }
-          } catch (err) {
-            console.error(`[DispatchStatus] Failed to get result text for ${projectId}:`, err);
-          }
-
-          results.push({
-            projectId,
-            status: 'completed',
-            projectName: (project as any).name,
-            completedAt: latestRequest.completedAt ?? undefined,
-            resultText,
-          });
-        } else if (reqStatus === 'failed') {
-          results.push({
-            projectId,
-            status: 'failed',
-            projectName: (project as any).name,
-            errorMessage: latestRequest.errorMessage ?? undefined,
-          });
-        } else {
-          results.push({
-            projectId,
-            status: 'active',
-            projectName: (project as any).name,
-          });
-        }
-      } catch (err) {
-        console.error(`[DispatchStatus] Error checking project ${projectId}:`, err);
-        results.push({ projectId, status: 'unknown' });
+    // Batch query 2: Get latest user request per project
+    // SQLite doesn't support DISTINCT ON, so we query all and deduplicate in JS
+    const allRequests = await dbClient
+      .select()
+      .from(userRequests)
+      .where(inArray(userRequests.projectId, projectIds))
+      .orderBy(desc(userRequests.createdAt));
+    const latestRequestMap = new Map<string, typeof allRequests[0]>();
+    for (const req of allRequests) {
+      if (!latestRequestMap.has(req.projectId)) {
+        latestRequestMap.set(req.projectId, req);
       }
     }
+
+    // Find which projects are completed and need result text
+    const completedProjectIds = projectIds.filter(pid => {
+      const req = latestRequestMap.get(pid);
+      return req && (req.status || '').toLowerCase() === 'completed';
+    });
+
+    // Batch query 3: Get last assistant message for completed projects only
+    const resultMap = new Map<string, string>();
+    if (completedProjectIds.length > 0) {
+      const assistantMsgs = await dbClient
+        .select({ projectId: messagesTable.projectId, content: messagesTable.content, createdAt: messagesTable.createdAt })
+        .from(messagesTable)
+        .where(
+          and(
+            inArray(messagesTable.projectId, completedProjectIds),
+            eq(messagesTable.role, 'assistant'),
+            eq(messagesTable.messageType, 'chat')
+          )
+        )
+        .orderBy(desc(messagesTable.createdAt));
+      // Deduplicate: keep first (latest) per project
+      for (const msg of assistantMsgs) {
+        if (!resultMap.has(msg.projectId) && msg.content) {
+          const text = msg.content.length > 2000 ? msg.content.slice(0, 2000) + '...' : msg.content;
+          resultMap.set(msg.projectId, text);
+        }
+      }
+    }
+
+    // Build results
+    const results: ProjectStatus[] = projectIds.map(projectId => {
+      const project = projectMap.get(projectId);
+      if (!project) return { projectId, status: 'unknown' as const };
+
+      const latestRequest = latestRequestMap.get(projectId);
+      if (!latestRequest) {
+        return { projectId, status: 'active' as const, projectName: project.name ?? undefined };
+      }
+
+      const reqStatus = (latestRequest.status || '').toLowerCase();
+      if (reqStatus === 'completed') {
+        return {
+          projectId,
+          status: 'completed' as const,
+          projectName: project.name ?? undefined,
+          completedAt: latestRequest.completedAt ?? undefined,
+          resultText: resultMap.get(projectId),
+        };
+      } else if (reqStatus === 'failed') {
+        return {
+          projectId,
+          status: 'failed' as const,
+          projectName: project.name ?? undefined,
+          errorMessage: latestRequest.errorMessage ?? undefined,
+        };
+      } else {
+        return {
+          projectId,
+          status: 'active' as const,
+          projectName: project.name ?? undefined,
+        };
+      }
+    });
 
     return NextResponse.json({ success: true, data: results });
   } catch (error) {

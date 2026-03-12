@@ -1463,6 +1463,18 @@ export async function executeClaude(
     const assistantStreamStates = new Map<string, AssistantStreamState>();
     const completedStreamSessions = new Set<string>();
 
+    // 用定时轮询替代每个 message 都查一次 DB，大幅降低 CPU
+    let _cancelCache = false;
+    let _cancelCheckTimer: ReturnType<typeof setInterval> | null = null;
+    if (requestId) {
+      // 立即检查一次
+      isCancelRequested(requestId).then(v => { _cancelCache = v; }).catch(() => {});
+      // 每 1.5 秒轮询一次，而不是每个 token 都查一次
+      _cancelCheckTimer = setInterval(() => {
+        isCancelRequested(requestId!).then(v => { _cancelCache = v; }).catch(() => {});
+      }, 1500);
+    }
+
     // Handle streaming response
     for await (const message of response) {
       if (__VERBOSE_LOG__) {
@@ -1491,13 +1503,10 @@ export async function executeClaude(
           }
         } catch { }
       }
-      // Check cancel flag proactively
+      // Check cancel flag proactively (using cached value, polled every 1.5s)
       if (requestId) {
         try {
-          const cancel = await isCancelRequested(requestId);
-          if (__VERBOSE_LOG__) {
-            try { console.log('############ interrupt_check', JSON.stringify({ requestId, cancel, hasAnnouncedInterrupt }, null, 0)); } catch { }
-          }
+          const cancel = _cancelCache;
           if (cancel && !hasAnnouncedInterrupt) {
             console.log(`[ClaudeService] 检测到中断标记，调用SDK中断: ${requestId}`);
             try { await response.interrupt(); } catch { }
@@ -1512,22 +1521,19 @@ export async function executeClaude(
                 message: '任务已被用户中断'
               }
             });
-            console.log(`[ClaudeService] 🛑 Published task_interrupted event for requestId: ${requestId}`);
 
             await safeMarkFailed('任务已被用户中断');
             publishStatus('cancelled', '任务已被用户中断');
             activeQueryInstances.delete(requestId);
+            if (_cancelCheckTimer) { clearInterval(_cancelCheckTimer); _cancelCheckTimer = null; }
             hasAnnouncedInterrupt = true;
             break;
           }
         } catch { }
       }
-      console.log('[ClaudeService] Message type:', message.type);
-
       if (message.type === 'stream_event') {
         const event: any = (message as any).event ?? {};
         const sessionKey = (message.session_id ?? message.uuid ?? 'default').toString();
-        console.log('[ClaudeService] Stream event type:', event.type);
 
         let streamState = assistantStreamStates.get(sessionKey);
 
@@ -2118,10 +2124,12 @@ export async function executeClaude(
 
     console.log('[ClaudeService] Streaming completed');
 
+    // 清理取消轮询定时器
+    if (_cancelCheckTimer) { clearInterval(_cancelCheckTimer); _cancelCheckTimer = null; }
+
     // 清理query实例
     if (requestId) {
       activeQueryInstances.delete(requestId);
-      console.log(`[ClaudeService] Cleaned up query instance for requestId: ${requestId}`);
     }
 
     // 发送任务完成事件到前端
@@ -2451,6 +2459,9 @@ export async function generatePlan(
 
   publishStatus('planning_start');
 
+  // 提升到 try 块外，使 catch 中可访问
+  let _planCancelTimer: ReturnType<typeof setInterval> | null = null;
+
   try {
     // 加载并应用 Claude 配置，获取自定义模型 ID
     const customModel = await loadAndApplyClaudeConfig();
@@ -2614,6 +2625,16 @@ export async function generatePlan(
     console.log(`[ClaudeService] 🚀 Published task_started event (planning) for requestId: ${requestId}`);
 
     let exitPlanDetected = false;
+
+    // 用定时轮询替代每个 message 都查 DB
+    let _planCancelCache = false;
+    if (requestId) {
+      isCancelRequested(requestId).then(v => { _planCancelCache = v; }).catch(() => {});
+      _planCancelTimer = setInterval(() => {
+        isCancelRequested(requestId!).then(v => { _planCancelCache = v; }).catch(() => {});
+      }, 1500);
+    }
+
     for await (const message of response) {
       if (__VERBOSE_LOG__) {
         try {
@@ -2642,7 +2663,7 @@ export async function generatePlan(
       }
       if (requestId) {
         try {
-          const cancel = await isCancelRequested(requestId);
+          const cancel = _planCancelCache;
           if (cancel && !hasAnnouncedInterrupt) {
             try { await response.interrupt(); } catch { }
             streamManager.publish(projectId, {
@@ -2657,6 +2678,7 @@ export async function generatePlan(
             try { await markUserRequestAsFailed(requestId, '任务已被用户中断'); } catch { }
             publishStatus('cancelled', '任务已被用户中断');
             activeQueryInstances.delete(requestId);
+            if (_planCancelTimer) { clearInterval(_planCancelTimer); _planCancelTimer = null; }
             hasAnnouncedInterrupt = true;
             break;
           }
@@ -2886,7 +2908,12 @@ export async function generatePlan(
       }
     }
 
+    // 清理取消轮询定时器
+    if (_planCancelTimer) { clearInterval(_planCancelTimer); _planCancelTimer = null; }
+
   } catch (error: any) {
+    // 清理取消轮询定时器
+    if (_planCancelTimer) { clearInterval(_planCancelTimer); _planCancelTimer = null; }
     if (requestId) {
       try { await markUserRequestAsFailed(requestId, error?.message); } catch { }
     }

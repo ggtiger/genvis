@@ -2620,19 +2620,14 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
                 clearInterval(pollIntervalRef.current);
                 pollIntervalRef.current = null;
               }
-              try { console.log('会话轮询结束：非活跃'); } catch {}
               // Trigger reload flag instead of direct call
               setHasLoadedOnce(false);
-            } else {
-              try { console.log('会话轮询：活跃'); } catch {}
             }
           }
         } catch (error) {
-          if (process.env.NODE_ENV === 'development') {
-            try { console.log('会话轮询失败'); } catch {}
-          }
+          // Suppress polling errors
         }
-      }, 3000); // Poll every 3 seconds
+      }, 15000); // Poll every 15 seconds
     },
     [projectId]
   );
@@ -2652,11 +2647,8 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
           setActiveSession(sessionData);
 
           if (session.status === 'active' || session.status === 'running') {
-            try { console.log(`检测到活跃会话，session=${session.sessionId}`); } catch {}
             // Start polling session status
             startSessionPolling(session.sessionId);
-          } else {
-            try { console.log('无活跃会话'); } catch {}
           }
         } else {
           // No active session found
@@ -2671,7 +2663,7 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
         
       }
       setActiveSession(null);
-      try { console.log('活跃会话检查失败'); } catch {}
+
     }
   }, [projectId, startSessionPolling]);
 
@@ -2728,7 +2720,7 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
         // Suppress polling errors; realtime channels may still recover.
         
       });
-    }, 3000); // Consistent 3-second interval when polling
+    }, 10000); // 10-second interval when polling (no real-time connection)
 
     return () => {
       if (pollIntervalRef.current) {

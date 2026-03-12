@@ -1330,14 +1330,13 @@ class PreviewManager {
         const shouldIgnore = isAssetRequest || ignorePatterns.some((re) => re.test(cleaned));
         const isDuplicate = cleaned === lastLine && Date.now() - lastTs < 2000;
 
-        // 始终写入 timeline（不裁剪、不忽略）
-        const logLevel = level === 'stderr' ? 'error' : 'info';
-        timelineLogger.logPreview(projectId, cleaned, logLevel, taskId).catch(() => {});
-
-        // 仅在不忽略且非短期重复时，推送到前端并缓存
+        // 仅在不忽略且非短期重复时，才写入 timeline 并推送到前端
         if (shouldIgnore || isDuplicate) {
           return;
         }
+
+        const logLevel = level === 'stderr' ? 'error' : 'info';
+        timelineLogger.logPreview(projectId, cleaned, logLevel, taskId).catch(() => {});
 
         lastLine = cleaned;
         lastTs = Date.now();

@@ -46,12 +46,27 @@ export interface TimelineEntry {
 }
 
 class TimelineLogger {
+  /** 已创建的日志目录缓存，避免每次 append 都调用 mkdir */
+  private dirInitialized = new Set<string>();
+
+  /** 写缓冲：projectId -> { ndjson lines, txt lines } */
+  private writeBuffer = new Map<string, { ndjson: string[]; txt: string[] }>();
+
+  /** 刷新定时器 */
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** 批量刷新间隔（毫秒） */
+  private readonly FLUSH_INTERVAL_MS = 300;
+
   /**
-   * 确保日志目录存在
+   * 确保日志目录存在（带缓存，每个 projectId 只 mkdir 一次）
    */
   private async ensureLogsDir(projectId: string): Promise<string> {
     const logsDir = path.join(PROJECTS_DIR_ABSOLUTE, projectId, 'logs');
-    await fs.mkdir(logsDir, { recursive: true });
+    if (!this.dirInitialized.has(projectId)) {
+      await fs.mkdir(logsDir, { recursive: true });
+      this.dirInitialized.add(projectId);
+    }
     return logsDir;
   }
 
@@ -75,7 +90,60 @@ class TimelineLogger {
   }
 
   /**
-   * 追加日志到 timeline.ndjson
+   * 调度批量 flush（防抖 + 定时）
+   */
+  private scheduleFlush(): void {
+    if (this.flushTimer !== null) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.flush().catch(() => {});
+    }, this.FLUSH_INTERVAL_MS);
+  }
+
+  /**
+   * 将缓冲区中的日志批量写入文件
+   */
+  private async flush(): Promise<void> {
+    if (this.writeBuffer.size === 0) return;
+
+    const snapshot = this.writeBuffer;
+    this.writeBuffer = new Map();
+
+    const rotateEnabled = String(process.env.TIMELINE_ROTATE ?? '') === '1';
+    const maxSizeMbRaw = String(process.env.TIMELINE_MAX_SIZE_MB ?? '64');
+    const maxSizeMb = Number(maxSizeMbRaw);
+    const sizeLimit = Number.isFinite(maxSizeMb) && maxSizeMb > 1 ? maxSizeMb * 1024 * 1024 : 64 * 1024 * 1024;
+
+    for (const [projectId, { ndjson, txt }] of snapshot) {
+      try {
+        const logPath = this.getLogFilePath(projectId);
+        const txtPath = path.join(PROJECTS_DIR_ABSOLUTE, projectId, 'logs', 'timeline.txt');
+
+        if (rotateEnabled) {
+          try {
+            const stat = await fs.stat(logPath).catch(() => undefined);
+            if (stat && stat.size > sizeLimit) {
+              const rotated = path.join(PROJECTS_DIR_ABSOLUTE, projectId, 'logs', `timeline.ndjson.${Date.now()}`);
+              await fs.rename(logPath, rotated).catch(() => {});
+            }
+            const tstat = await fs.stat(txtPath).catch(() => undefined);
+            if (tstat && tstat.size > sizeLimit) {
+              const trotated = path.join(PROJECTS_DIR_ABSOLUTE, projectId, 'logs', `timeline.txt.${Date.now()}`);
+              await fs.rename(txtPath, trotated).catch(() => {});
+            }
+          } catch {}
+        }
+
+        await fs.appendFile(logPath, ndjson.join(''), { encoding: 'utf8' });
+        await fs.appendFile(txtPath, txt.join(''), { encoding: 'utf8' });
+      } catch (error) {
+        console.error('[TimelineLogger] Failed to flush logs:', error);
+      }
+    }
+  }
+
+  /**
+   * 追加日志到 timeline.ndjson（带写缓冲，批量 flush 减少 I/O）
    */
   async append(entry: Omit<TimelineEntry, 'ts'>): Promise<void> {
     try {
@@ -87,24 +155,7 @@ class TimelineLogger {
         message: this.addPrefix(entry.type, entry.message),
       };
 
-      const line = JSON.stringify(logEntry) + '\n';
-      const logPath = this.getLogFilePath(entry.projectId);
-
-      const rotateEnabled = String(process.env.TIMELINE_ROTATE ?? '') === '1';
-      const maxSizeMbRaw = String(process.env.TIMELINE_MAX_SIZE_MB ?? '64');
-      const maxSizeMb = Number(maxSizeMbRaw);
-      const sizeLimit = Number.isFinite(maxSizeMb) && maxSizeMb > 1 ? maxSizeMb * 1024 * 1024 : 64 * 1024 * 1024;
-      try {
-        if (rotateEnabled) {
-          const stat = await fs.stat(logPath).catch(() => undefined);
-          if (stat && stat.size > sizeLimit) {
-            const rotated = path.join(PROJECTS_DIR_ABSOLUTE, entry.projectId, 'logs', `timeline.ndjson.${Date.now()}`);
-            await fs.rename(logPath, rotated).catch(() => {});
-          }
-        }
-      } catch {}
-
-      await fs.appendFile(logPath, line, { encoding: 'utf8' });
+      const ndjsonLine = JSON.stringify(logEntry) + '\n';
 
       const ts = logEntry.ts;
       const level = logEntry.level;
@@ -133,18 +184,17 @@ class TimelineLogger {
           return `${k}=${val}`;
         })
         .join(' ');
-      const textLine = [ts, level, component, event, msg, kv].filter(Boolean).join(' - ') + '\n';
-      const txtPath = path.join(PROJECTS_DIR_ABSOLUTE, entry.projectId, 'logs', 'timeline.txt');
-      try {
-        if (rotateEnabled) {
-          const tstat = await fs.stat(txtPath).catch(() => undefined);
-          if (tstat && tstat.size > sizeLimit) {
-            const trotated = path.join(PROJECTS_DIR_ABSOLUTE, entry.projectId, 'logs', `timeline.txt.${Date.now()}`);
-            await fs.rename(txtPath, trotated).catch(() => {});
-          }
-        }
-      } catch {}
-      await fs.appendFile(txtPath, textLine, { encoding: 'utf8' });
+      const txtLine = [ts, level, component, event, msg, kv].filter(Boolean).join(' - ') + '\n';
+
+      // 写入缓冲区，等待批量 flush
+      if (!this.writeBuffer.has(entry.projectId)) {
+        this.writeBuffer.set(entry.projectId, { ndjson: [], txt: [] });
+      }
+      const buf = this.writeBuffer.get(entry.projectId)!;
+      buf.ndjson.push(ndjsonLine);
+      buf.txt.push(txtLine);
+
+      this.scheduleFlush();
     } catch (error) {
       console.error('[TimelineLogger] Failed to append log:', error);
       // 不抛出错误，避免阻塞主流程

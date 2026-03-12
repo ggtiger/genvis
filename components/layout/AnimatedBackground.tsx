@@ -26,24 +26,25 @@ interface AnimatedBackgroundProps {
 function AnimatedBackground({ 
   bgUrl, 
   bgCss, 
-  animationType = 'kenburns',
+  animationType = 'none',
   className = ''
 }: AnimatedBackgroundProps) {
   // 延迟启动动画，避免首次加载时的布局抖动
   const [isReady, setIsReady] = useState(false);
   
-  // 随机选择一个动画变体，让不同页面/刷新时有不同的动画效果
+  // 随机选择一个动画变体
   const animationVariant = useMemo(() => {
     return Math.floor(Math.random() * 4) + 1; // 1-4
   }, []);
 
-  // 延迟启动动画，确保页面布局稳定后再开始
+  // 延迟启动动画
   useEffect(() => {
+    if (animationType === 'none') return;
     const timer = setTimeout(() => {
       setIsReady(true);
     }, 100);
     return () => clearTimeout(timer);
-  }, []);
+  }, [animationType]);
 
   // 如果是 CSS 渐变背景，添加动态渐变动画
   if (bgCss) {

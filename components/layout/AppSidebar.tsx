@@ -129,8 +129,8 @@ export default function AppSidebar({
 
   useEffect(() => {
     loadSkillsDeployInfo();
-    // Refresh every 5s to pick up status changes (building → deployed)
-    const interval = setInterval(loadSkillsDeployInfo, 5000);
+    // Refresh every 15s to pick up status changes (building → deployed)
+    const interval = setInterval(loadSkillsDeployInfo, 15000);
     return () => clearInterval(interval);
   }, [loadSkillsDeployInfo]);
 

@@ -212,7 +212,8 @@ const initCustomTitleBar = () => {
 
   // macOS 需要更大的左侧 padding 以避免红绿灯按钮遮挡标题
   const isMac = process.platform === 'darwin';
-  const leftPadding = isMac ? '80px' : '16px';
+  // Windows/Linux 也需要为红绿灯留出空间
+  const leftPadding = isMac ? '80px' : '12px';
 
   Object.assign(titleBar.style, {
     position: 'fixed',
@@ -242,15 +243,6 @@ const initCustomTitleBar = () => {
   });
   navGroup.style.webkitAppRegion = 'no-drag';
   navGroup.addEventListener('dblclick', (event) => event.stopPropagation());
-
-  const controlsSection = document.createElement('div');
-  Object.assign(controlsSection.style, {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px'
-  });
-  controlsSection.style.webkitAppRegion = 'no-drag';
-  controlsSection.addEventListener('dblclick', (event) => event.stopPropagation());
 
   const leftSection = document.createElement('div');
   Object.assign(leftSection.style, {
@@ -362,19 +354,105 @@ const initCustomTitleBar = () => {
   titleSection.appendChild(statusDot);
   titleSection.appendChild(titleText);
 
-  const minimizeButton = createToolbarButton('–', '最小化');
+  // ===== Windows/Linux 红绿灯窗口控制按钮 =====
+  const trafficLightContainer = document.createElement('div');
+  Object.assign(trafficLightContainer.style, {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '0 4px'
+  });
+  trafficLightContainer.style.webkitAppRegion = 'no-drag';
+  trafficLightContainer.addEventListener('dblclick', (event) => event.stopPropagation());
+
+  const TRAFFIC_LIGHT_SIZE = '13px';
+  const TRAFFIC_COLORS = {
+    close:    { bg: '#ff5f57', hover: '#ff3b30', active: '#bf4040' },
+    minimize: { bg: '#febc2e', hover: '#f0a500', active: '#c89320' },
+    maximize: { bg: '#28c840', hover: '#1aab32', active: '#1a9b30' }
+  };
+
+  // SVG 图标（hover 时显示）
+  const TRAFFIC_ICONS = {
+    close:    '<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 1l6 6M7 1l-6 6" stroke="rgba(0,0,0,0.5)" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    minimize: '<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4h6" stroke="rgba(0,0,0,0.5)" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    maximize: '<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 1l3 3-3 3M4.5 1l3 3-3 3" stroke="rgba(0,0,0,0.5)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+    restore:  '<svg width="8" height="8" viewBox="0 0 8 8"><path d="M7 1L4 4l3 3M3.5 1L.5 4l3 3" stroke="rgba(0,0,0,0.5)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>'
+  };
+
+  const createTrafficButton = (type, ariaLabel) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('aria-label', ariaLabel);
+    btn.className = 'traffic-light-btn';
+    const colors = TRAFFIC_COLORS[type];
+    Object.assign(btn.style, {
+      width: TRAFFIC_LIGHT_SIZE,
+      height: TRAFFIC_LIGHT_SIZE,
+      borderRadius: '50%',
+      border: 'none',
+      backgroundColor: colors.bg,
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '0',
+      transition: 'background-color 0.1s ease, transform 0.1s ease',
+      boxShadow: `inset 0 0 0 0.5px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.15)`
+    });
+    btn.style.webkitAppRegion = 'no-drag';
+    // 内部 SVG 容器
+    const iconSpan = document.createElement('span');
+    Object.assign(iconSpan.style, {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      opacity: '0',
+      transition: 'opacity 0.12s ease',
+      lineHeight: '0'
+    });
+    btn.appendChild(iconSpan);
+
+    btn.addEventListener('mouseenter', () => {
+      btn.style.backgroundColor = colors.hover;
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.backgroundColor = colors.bg;
+    });
+    btn.addEventListener('mousedown', (event) => {
+      event.stopPropagation();
+      btn.style.backgroundColor = colors.active;
+      btn.style.transform = 'scale(0.9)';
+    });
+    btn.addEventListener('mouseup', () => {
+      btn.style.backgroundColor = colors.hover;
+      btn.style.transform = 'scale(1)';
+    });
+
+    return { btn, iconSpan };
+  };
+
+  const { btn: closeButton, iconSpan: closeIcon } = createTrafficButton('close', '关闭窗口');
+  closeIcon.innerHTML = TRAFFIC_ICONS.close;
+  closeButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    ipcRenderer.invoke('window-control', { action: 'close' });
+  });
+
+  const { btn: minimizeButton, iconSpan: minimizeIcon } = createTrafficButton('minimize', '最小化');
+  minimizeIcon.innerHTML = TRAFFIC_ICONS.minimize;
   minimizeButton.addEventListener('click', (event) => {
     event.stopPropagation();
     ipcRenderer.invoke('window-control', { action: 'minimize' });
   });
 
-  const maximizeButton = createToolbarButton('▢', '最大化或还原');
+  const { btn: maximizeButton, iconSpan: maximizeIcon } = createTrafficButton('maximize', '最大化或还原');
+  maximizeIcon.innerHTML = TRAFFIC_ICONS.maximize;
   const updateMaximizeVisual = (isMaximized = false) => {
     maximizeButton.setAttribute('data-maximized', isMaximized ? 'true' : 'false');
-    maximizeButton.textContent = isMaximized ? '❐' : '▢';
+    maximizeIcon.innerHTML = isMaximized ? TRAFFIC_ICONS.restore : TRAFFIC_ICONS.maximize;
     maximizeButton.setAttribute('aria-label', isMaximized ? '还原窗口' : '最大化窗口');
   };
-
   maximizeButton.addEventListener('click', async (event) => {
     event.stopPropagation();
     try {
@@ -387,23 +465,20 @@ const initCustomTitleBar = () => {
     }
   });
 
-  const closeButton = createToolbarButton('×', '关闭窗口', { fontSize: '15px' });
-  closeButton.addEventListener('mouseenter', () => {
-    closeButton.style.backgroundColor = '#ef4444';
+  // 红绿灯容器 hover 时显示所有图标
+  trafficLightContainer.appendChild(closeButton);
+  trafficLightContainer.appendChild(minimizeButton);
+  trafficLightContainer.appendChild(maximizeButton);
+
+  trafficLightContainer.addEventListener('mouseenter', () => {
+    trafficLightContainer.querySelectorAll('.traffic-light-btn span').forEach(s => {
+      s.style.opacity = '1';
+    });
   });
-  closeButton.addEventListener('mouseleave', () => {
-    closeButton.style.backgroundColor = 'transparent';
-  });
-  closeButton.addEventListener('mousedown', (event) => {
-    event.stopPropagation();
-    closeButton.style.backgroundColor = '#b91c1c';
-  });
-  closeButton.addEventListener('mouseup', () => {
-    closeButton.style.backgroundColor = '#ef4444';
-  });
-  closeButton.addEventListener('click', (event) => {
-    event.stopPropagation();
-    ipcRenderer.invoke('window-control', { action: 'close' });
+  trafficLightContainer.addEventListener('mouseleave', () => {
+    trafficLightContainer.querySelectorAll('.traffic-light-btn span').forEach(s => {
+      s.style.opacity = '0';
+    });
   });
 
   const devToolsButton = createToolbarButton('</>', '切换开发者工具', {
@@ -438,12 +513,9 @@ const initCustomTitleBar = () => {
     }
   });
 
-  // Only show window control buttons on non-macOS (Windows/Linux)
-  // macOS has native traffic light buttons
+  // Windows/Linux: 红绿灯按钮放在左侧（类似 macOS 风格）
   if (!isMac) {
-    controlsSection.appendChild(minimizeButton);
-    controlsSection.appendChild(maximizeButton);
-    controlsSection.appendChild(closeButton);
+    leftSection.appendChild(trafficLightContainer);
   }
 
   leftSection.appendChild(slimModeButton);
@@ -452,10 +524,6 @@ const initCustomTitleBar = () => {
   rightSection.appendChild(navGroup);
   rightSection.appendChild(devToolsButton);
   rightSection.appendChild(newWindowButton);
-  // Only append controlsSection if it has children (non-macOS)
-  if (!isMac) {
-    rightSection.appendChild(controlsSection);
-  }
 
   titleBar.appendChild(leftSection);
   titleBar.appendChild(rightSection);

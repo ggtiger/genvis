@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { User } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '';
-const REFRESH_INTERVAL = Number(process.env.NEXT_PUBLIC_EMPLOYEE_STATUS_REFRESH_INTERVAL) * 1000 || 5000;
+const REFRESH_INTERVAL = Number(process.env.NEXT_PUBLIC_EMPLOYEE_STATUS_REFRESH_INTERVAL) * 1000 || 15000;
 
 interface RunningTask {
   id: string;

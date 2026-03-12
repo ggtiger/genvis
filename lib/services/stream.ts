@@ -44,11 +44,6 @@ export class StreamManager {
     this.latestController.set(projectId, controller);
     const id = randomUUID();
     this.connectionIds.set(controller, id);
-    console.log(`[StreamManager] 新增 SSE 连接`, {
-      projectId,
-      totalStreams: this.streams.get(projectId)!.size,
-      connectionId: id
-    });
     return id;
   }
 
@@ -60,11 +55,6 @@ export class StreamManager {
     if (projectStreams) {
       projectStreams.delete(controller);
       const id = this.connectionIds.get(controller);
-      console.log(`[StreamManager] 移除 SSE 连接`, {
-        projectId,
-        remainingStreams: projectStreams.size,
-        connectionId: id
-      });
 
       // 如果移除的是最新连接，回退到仍存活的任意一个连接
       const latest = this.latestController.get(projectId);
@@ -92,29 +82,17 @@ export class StreamManager {
     // websocketManager.broadcast(projectId, event);
 
     const projectStreams = this.streams.get(projectId);
-    if (!projectStreams || projectStreams.size === 0) {
-      // 特别关注 planning_completed 事件丢失
-      if (event.type === 'status' && (event.data as any)?.status === 'planning_completed') {
-        console.error('❌ [StreamManager] planning_completed 事件无法发送：没有活跃的 SSE 连接', {
-          projectId,
-          streamCount: projectStreams?.size ?? 0,
-          requestId: (event.data as any)?.requestId
-        });
+
+    // 特别关注 planning_completed 事件丢失
+    if (event.type === 'status' && (event.data as any)?.status === 'planning_completed') {
+      if (!projectStreams || projectStreams.size === 0) {
+        console.error('❌ [StreamManager] planning_completed 事件无法发送：没有活跃的 SSE 连接', { projectId });
+        return;
       }
-      return;
     }
 
-    // 特别关注 planning_completed 事件
-    if (event.type === 'status' && (event.data as any)?.status === 'planning_completed') {
-      const latest = this.latestController.get(projectId);
-      const latestId = latest ? this.connectionIds.get(latest) : undefined;
-      console.log('📡 [StreamManager] 准备发送 planning_completed', {
-        projectId,
-        streamCount: projectStreams.size,
-        requestId: (event.data as any)?.requestId,
-        hasPlanMd: !!((event.data as any)?.planMd),
-        targetConnectionId: latestId ?? 'broadcast'
-      });
+    if (!projectStreams || projectStreams.size === 0) {
+      return;
     }
 
     const message = `data: ${JSON.stringify(event)}\n\n`;
@@ -132,15 +110,7 @@ export class StreamManager {
       sendIndex++;
       try {
         controller.enqueue(encodedMessage);
-        // 特别关注 planning_completed 发送到每个连接
-        if (event.type === 'status' && (event.data as any)?.status === 'planning_completed') {
-          console.log(`[StreamManager] planning_completed 发送到连接 #${sendIndex}`, {
-            requestId: (event.data as any)?.requestId,
-            connectionId: this.connectionIds.get(controller)
-          });
-        }
       } catch (error) {
-        console.error(`[StreamManager] Failed to send message to connection #${sendIndex}:`, error);
         // Mark for removal after iteration
         deadControllers.push(controller);
       }
@@ -150,16 +120,6 @@ export class StreamManager {
     deadControllers.forEach((controller) => {
       this.removeStream(projectId, controller);
     });
-
-    // 确认 planning_completed 发送成功
-    if (event.type === 'status' && (event.data as any)?.status === 'planning_completed') {
-      console.log('✅ [StreamManager] planning_completed 已发送到所有连接', {
-        projectId,
-        successCount: controllersToSend.length - deadControllers.length,
-        deadCount: deadControllers.length,
-        requestId: (event.data as any)?.requestId
-      });
-    }
   }
 
   /**
@@ -195,7 +155,6 @@ export class StreamManager {
         }
       });
       this.streams.delete(projectId);
-      console.log(`[StreamManager] Closed all streams for project: ${projectId}`);
     }
   }
 
@@ -206,7 +165,6 @@ export class StreamManager {
     this.streams.forEach((projectStreams, projectId) => {
       this.closeProjectStreams(projectId);
     });
-    console.log(`[StreamManager] Closed all streams`);
   }
 }
 

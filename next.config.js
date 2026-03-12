@@ -121,8 +121,14 @@ const nextConfig = {
           '**/node_modules/**',
           '**/.next/**',
           '**/.git/**',
-          '**/data/projects/**',  // Exclude user sub-projects
+          '**/data/**',            // Exclude ALL data files (logs, uploads, projects, user-skills, etc.)
+          '**/skills/**',          // Exclude skill directories
+          '**/python-runtime/**',  // Exclude Python runtime
+          '**/node-runtime/**',    // Exclude Node runtime
+          '**/.temp/**',           // Exclude temp files
         ],
+        poll: false,               // Disable polling-based watching (use native fs events)
+        aggregateTimeout: 1000,    // Wait 1s before triggering rebuild after file change
       };
     }
 
