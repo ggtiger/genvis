@@ -210,10 +210,10 @@ const initCustomTitleBar = () => {
   const titleBar = document.createElement('div');
   titleBar.id = TITLEBAR_ID;
 
-  // 统一所有平台的左侧 padding，保持红绿灯按钮位置一致
+  // macOS 需要更大的左侧 padding 以避免红绿灯按钮遮挡标题
   const isMac = process.platform === 'darwin';
-  // Windows/Linux 使用相同的 80px padding，确保红绿灯按钮位置与 macOS 一致
-  const leftPadding = '80px';
+  // Windows/Linux 也需要为红绿灯留出空间
+  const leftPadding = isMac ? '80px' : '12px';
 
   Object.assign(titleBar.style, {
     position: 'fixed',

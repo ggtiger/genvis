@@ -711,7 +711,7 @@ async function createMainWindow() {
         minWidth: 800,
         minHeight: 600,
         backgroundColor: '#ffffff',
-        frame: false, // 二级窗口也使用自定义标题栏
+        frame: false,
         titleBarStyle: 'hidden',
         trafficLightPosition: { x: 12, y: 12 },
         webPreferences: {
@@ -719,7 +719,7 @@ async function createMainWindow() {
           contextIsolation: true,
           nodeIntegration: false,
           spellcheck: false,
-          additionalArguments: [], // 二级窗口不使用自定义标题栏
+          additionalArguments: [],
         },
       },
     };
