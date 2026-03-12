@@ -549,7 +549,7 @@ if (SHOULD_USE_CUSTOM_TITLEBAR) {
   const createTitleBarAfterHydration = () => {
     console.log('[Preload] 准备创建标题栏...');
 
-    // 使用 requestIdleCallback 或 setTimeout 兜底，确保在浏览器空闲时执行
+    // 使用 requestIdleCallback 或 setTimeout 兆底，确保在浏览器空闲时执行
     const scheduleInit = (callback) => {
       if (typeof requestIdleCallback !== 'undefined') {
         requestIdleCallback(callback, { timeout: 500 });
@@ -581,5 +581,164 @@ if (SHOULD_USE_CUSTOM_TITLEBAR) {
     createTitleBarAfterHydration();
   } else {
     window.addEventListener('load', createTitleBarAfterHydration, { once: true });
+  }
+}
+
+// ==================== Windows/Linux 浮动红绿灯 ====================
+// 在非 macOS 平台上添加浮动红绿灯按钮（不需要头部栏，与 macOS 原生红绿灯位置一致）
+if (process.platform !== 'darwin' && !SHOULD_USE_CUSTOM_TITLEBAR) {
+  const FLOATING_TL_ID = 'electron-floating-traffic-lights';
+
+  const injectFloatingTrafficLights = () => {
+    if (document.getElementById(FLOATING_TL_ID)) return;
+    const body = document.body;
+    if (!body) { window.requestAnimationFrame(injectFloatingTrafficLights); return; }
+
+    // 容器：定位与 macOS trafficLightPosition { x: 25, y: 15 } 一致
+    const container = document.createElement('div');
+    container.id = FLOATING_TL_ID;
+    Object.assign(container.style, {
+      position: 'fixed',
+      top: '15px',
+      left: '25px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      zIndex: '2147483646',
+      padding: '0',
+      pointerEvents: 'auto'
+    });
+    container.style.webkitAppRegion = 'no-drag';
+    container.addEventListener('dblclick', (e) => e.stopPropagation());
+
+    const TL_SIZE = '13px';
+    const TL_COLORS = {
+      close:    { bg: '#ff5f57', hover: '#ff3b30', active: '#bf4040' },
+      minimize: { bg: '#febc2e', hover: '#f0a500', active: '#c89320' },
+      maximize: { bg: '#28c840', hover: '#1aab32', active: '#1a9b30' }
+    };
+    const TL_ICONS = {
+      close:    '<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 1l6 6M7 1l-6 6" stroke="rgba(0,0,0,0.5)" stroke-width="1.2" stroke-linecap="round"/></svg>',
+      minimize: '<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4h6" stroke="rgba(0,0,0,0.5)" stroke-width="1.2" stroke-linecap="round"/></svg>',
+      maximize: '<svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 1l3 3-3 3M4.5 1l3 3-3 3" stroke="rgba(0,0,0,0.5)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+      restore:  '<svg width="8" height="8" viewBox="0 0 8 8"><path d="M7 1L4 4l3 3M3.5 1L.5 4l3 3" stroke="rgba(0,0,0,0.5)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>'
+    };
+
+    const makeTLBtn = (type, label) => {
+      const colors = TL_COLORS[type];
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('aria-label', label);
+      btn.className = 'floating-tl-btn';
+      Object.assign(btn.style, {
+        width: TL_SIZE, height: TL_SIZE,
+        borderRadius: '50%', border: 'none',
+        backgroundColor: colors.bg, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '0',
+        transition: 'background-color 0.1s ease, transform 0.1s ease',
+        boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.15)'
+      });
+      btn.style.webkitAppRegion = 'no-drag';
+
+      const icon = document.createElement('span');
+      Object.assign(icon.style, {
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        opacity: '0', transition: 'opacity 0.12s ease', lineHeight: '0'
+      });
+      btn.appendChild(icon);
+
+      btn.addEventListener('mouseenter', () => { btn.style.backgroundColor = colors.hover; });
+      btn.addEventListener('mouseleave', () => { btn.style.backgroundColor = colors.bg; });
+      btn.addEventListener('mousedown', (e) => {
+        e.stopPropagation(); btn.style.backgroundColor = colors.active; btn.style.transform = 'scale(0.9)';
+      });
+      btn.addEventListener('mouseup', () => {
+        btn.style.backgroundColor = colors.hover; btn.style.transform = 'scale(1)';
+      });
+      return { btn, icon };
+    };
+
+    // 关闭
+    const { btn: closeBtn, icon: closeIcon } = makeTLBtn('close', '关闭窗口');
+    closeIcon.innerHTML = TL_ICONS.close;
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); ipcRenderer.invoke('window-control', { action: 'close' });
+    });
+
+    // 最小化
+    const { btn: minBtn, icon: minIcon } = makeTLBtn('minimize', '最小化');
+    minIcon.innerHTML = TL_ICONS.minimize;
+    minBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); ipcRenderer.invoke('window-control', { action: 'minimize' });
+    });
+
+    // 最大化/还原
+    const { btn: maxBtn, icon: maxIcon } = makeTLBtn('maximize', '最大化或还原');
+    maxIcon.innerHTML = TL_ICONS.maximize;
+    const updateMaxIcon = (isMax = false) => {
+      maxIcon.innerHTML = isMax ? TL_ICONS.restore : TL_ICONS.maximize;
+      maxBtn.setAttribute('aria-label', isMax ? '还原窗口' : '最大化窗口');
+    };
+    maxBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const res = await ipcRenderer.invoke('window-control', { action: 'toggle-maximize' });
+        if (res && res.state) updateMaxIcon(res.state.isMaximized);
+      } catch (err) { console.error('切换最大化失败:', err); }
+    });
+
+    container.appendChild(closeBtn);
+    container.appendChild(minBtn);
+    container.appendChild(maxBtn);
+
+    // hover 容器时显示所有图标
+    container.addEventListener('mouseenter', () => {
+      container.querySelectorAll('.floating-tl-btn span').forEach(s => { s.style.opacity = '1'; });
+    });
+    container.addEventListener('mouseleave', () => {
+      container.querySelectorAll('.floating-tl-btn span').forEach(s => { s.style.opacity = '0'; });
+    });
+
+    body.appendChild(container);
+
+    // 同步最大化状态
+    ipcRenderer.invoke('get-window-state')
+      .then((state) => updateMaxIcon(state?.isMaximized))
+      .catch(() => updateMaxIcon(false));
+    ipcRenderer.on('window-state-changed', (_event, state) => {
+      updateMaxIcon(state?.isMaximized);
+    });
+  };
+
+  // 等待 DOM 准备就绪后注入
+  const scheduleInject = () => {
+    const doInject = () => {
+      if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(injectFloatingTrafficLights, { timeout: 500 });
+      } else {
+        setTimeout(injectFloatingTrafficLights, 300);
+      }
+    };
+    if (document.readyState === 'complete') {
+      doInject();
+    } else {
+      window.addEventListener('load', doInject, { once: true });
+    }
+  };
+  scheduleInject();
+
+  // 如果被意外移除则重新注入
+  const tlObserver = new MutationObserver(() => {
+    if (document.body && !document.getElementById(FLOATING_TL_ID)) {
+      injectFloatingTrafficLights();
+    }
+  });
+  if (document.body) {
+    tlObserver.observe(document.body, { childList: true, subtree: false });
+  } else {
+    window.addEventListener('DOMContentLoaded', () => {
+      tlObserver.observe(document.body, { childList: true, subtree: false });
+    }, { once: true });
   }
 }
