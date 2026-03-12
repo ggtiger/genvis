@@ -644,15 +644,14 @@ async function createMainWindow() {
     show: false,
     backgroundColor: '#111827',
     frame: false,
-    titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 25, y: 15 },
+    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'defaultOverlay',
     title: `G.E.N.V.I.S 预览版 V${APP_VERSION}`,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
-      additionalArguments: [`--app-version=${APP_VERSION}`, '--enable-custom-titlebar'],
+      additionalArguments: [`--app-version=${APP_VERSION}`],
     },
   });
 
@@ -1141,15 +1140,14 @@ function registerIpcHandlers() {
         show: false,
         backgroundColor: '#111827',
         frame: false,
-        titleBarStyle: 'hidden',
-        trafficLightPosition: { x: 12, y: 12 },
+        titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'defaultOverlay',
         title: `G.E.N.V.I.S 预览版 V${APP_VERSION}`,
         webPreferences: {
           preload: preloadPath,
           contextIsolation: true,
           nodeIntegration: false,
           spellcheck: false,
-          additionalArguments: [`--app-version=${APP_VERSION}`, '--enable-custom-titlebar'],
+          additionalArguments: [`--app-version=${APP_VERSION}`],
         },
       });
 
