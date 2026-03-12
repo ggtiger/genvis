@@ -1,6 +1,7 @@
 "use client";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getDefaultModelForCli } from '@/lib/constants/cliModels';
+import type { AIServicesConfig } from '@/lib/config/prompts/ai-services';
 
 export type GlobalAISettings = {
   default_cli: string;
@@ -11,6 +12,7 @@ export type GlobalAISettings = {
       [key: string]: unknown;
     };
   };
+  ai_services?: AIServicesConfig;
   server?: {
     allow_remote_access: boolean;
   };

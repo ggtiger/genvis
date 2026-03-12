@@ -37,24 +37,31 @@ export default function SkillsSettings() {
       if (response.ok) {
         const data = await response.json();
         const skillsData = data.data || [];
-        const skillsWithEnvCheck = await Promise.all(
-          skillsData.map(async (skill: SkillMeta) => {
-            const requiredVars = skill.envVars?.filter(v => v.required) || [];
-            if (requiredVars.length > 0) {
+        // 先立即渲染列表（不等env检查）
+        setSkills(skillsData.map((s: SkillMeta) => ({ ...s, hasUnfilledRequiredVars: false })));
+
+        // 延迟检查环境变量（不阻塞首屏）
+        const skillsNeedCheck = skillsData.filter((s: SkillMeta) => s.envVars?.some(v => v.required));
+        if (skillsNeedCheck.length > 0) {
+          const envResults = await Promise.all(
+            skillsNeedCheck.map(async (skill: SkillMeta) => {
               try {
                 const envResponse = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(skill.name)}/env`);
                 const envData = await envResponse.json();
                 const envValues = envData.success ? envData.data : {};
-                const missingVars = requiredVars.filter(v => !envValues[v.key]);
-                return { ...skill, hasUnfilledRequiredVars: missingVars.length > 0 };
+                const missingVars = (skill.envVars?.filter(v => v.required) || []).filter(v => !envValues[v.key]);
+                return { name: skill.name, hasUnfilledRequiredVars: missingVars.length > 0 };
               } catch {
-                return { ...skill, hasUnfilledRequiredVars: true };
+                return { name: skill.name, hasUnfilledRequiredVars: true };
               }
-            }
-            return { ...skill, hasUnfilledRequiredVars: false };
-          })
-        );
-        setSkills(skillsWithEnvCheck);
+            })
+          );
+          const envMap = new Map(envResults.map(r => [r.name, r.hasUnfilledRequiredVars]));
+          setSkills(prev => prev.map(s => ({
+            ...s,
+            hasUnfilledRequiredVars: envMap.get(s.name) ?? false,
+          })));
+        }
       }
     } catch (error) {
       console.error('Failed to load skills:', error);
