@@ -357,7 +357,7 @@ function WorkspaceContent() {
     available: true
   }));
 
-  // Load projects
+  // Load projects (for main content, need all projects)
   const loadProjects = useCallback(async () => {
     try {
       const r = await fetch(`${API_BASE}/api/projects`);
@@ -760,13 +760,6 @@ function WorkspaceContent() {
             router.push(`/workspace?view=${page}`);
           }
         }}
-        recentApps={projects.slice(0, 5).map((p: any, i: number) => ({
-          id: p.id || p.project_id || String(i),
-          name: p.name || p.description?.slice(0, 20) || '未命名项目',
-          status: p.status,
-          deployedUrl: p.deployedUrl,
-          dependenciesInstalled: p.dependenciesInstalled,
-        }))}
         theme={theme}
         mounted={mounted}
         onToggleTheme={toggleTheme}

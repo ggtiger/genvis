@@ -18,20 +18,18 @@ interface AppSidebarProps {
   currentPage: 'home' | 'templates' | 'apps' | 'employees' | 'skills' | 'help' | 'settings' | 'boss' | 'lan-chat';
   onNavigate?: (page: string) => void;
   projectsCount?: number;
-  recentApps?: { id: string; name: string; color?: string; statusLabel?: string; status?: string; deployedUrl?: string; dependenciesInstalled?: boolean }[];
   theme?: string;
   mounted?: boolean;
   onToggleTheme?: () => void;
 }
 
-const defaultRecentApps: AppSidebarProps['recentApps'] = [
+const defaultRecentApps: { id: string; name: string; color?: string; statusLabel?: string; status?: string; deployedUrl?: string; dependenciesInstalled?: boolean }[] = [
   { id: '1', name: '', color: '' },
 ];
 
 export default function AppSidebar({
   currentPage,
   onNavigate,
-  recentApps,
   theme,
   mounted: mountedProp,
   onToggleTheme,
@@ -41,9 +39,31 @@ export default function AppSidebar({
   const [appVersion, setAppVersion] = useState(packageJson.version);
   const [skillsDeployInfo, setSkillsDeployInfo] = useState<SkillDeployInfo[]>([]);
 
+  // Recent apps state - loaded independently from parent
+  const [recentApps, setRecentApps] = useState<{ id: string; name: string; color?: string; statusLabel?: string; status?: string; deployedUrl?: string; dependenciesInstalled?: boolean }[]>([]);
+
   // Context files state
   interface CtxFile { id: string; name: string; absolutePath: string; mimeType: string; size: number; type: string; pinned: boolean; createdAt: string; exists?: boolean }
   const [contextFiles, setContextFiles] = useState<CtxFile[]>([]);
+
+  const loadRecentApps = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/recent`);
+      if (res.ok) {
+        const payload = await res.json();
+        const items = payload.success && Array.isArray(payload.data) ? payload.data : [];
+        setRecentApps(items.map((p: any) => ({
+          id: p.id || String(Math.random()),
+          name: p.name || p.description?.slice(0, 20) || '未命名项目',
+          status: p.status,
+          deployedUrl: p.deployedUrl,
+          dependenciesInstalled: p.dependenciesInstalled,
+        })));
+      }
+    } catch {
+      // Silently ignore
+    }
+  }, []);
 
   const loadContextFiles = useCallback(async () => {
     try {
@@ -57,9 +77,15 @@ export default function AppSidebar({
 
   useEffect(() => {
     loadContextFiles();
-    const interval = setInterval(loadContextFiles, 15000);
+    const interval = setInterval(loadContextFiles, 60000);
     return () => clearInterval(interval);
-  }, [loadContextFiles]);
+  }, []);
+
+  useEffect(() => {
+    loadRecentApps();
+    const interval = setInterval(loadRecentApps, 60000);
+    return () => clearInterval(interval);
+  }, [loadRecentApps]);
 
   const handleDeleteCtx = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -129,10 +155,9 @@ export default function AppSidebar({
 
   useEffect(() => {
     loadSkillsDeployInfo();
-    // Refresh every 15s to pick up status changes (building → deployed)
-    const interval = setInterval(loadSkillsDeployInfo, 15000);
+    const interval = setInterval(loadSkillsDeployInfo, 60000);
     return () => clearInterval(interval);
-  }, [loadSkillsDeployInfo]);
+  }, []);
 
   // Enrich recentApps with skill deploy status
   const enrichedRecentApps = useMemo(() => {

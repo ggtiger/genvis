@@ -15,10 +15,11 @@ function SettingsContent() {
 
   const loadProjects = useCallback(async () => {
     try {
-      const r = await fetch(`${API_BASE}/api/projects`);
+      // Use optimized recent projects endpoint - only fetches 5 items
+      const r = await fetch(`${API_BASE}/api/projects/recent`);
       if (!r.ok) return;
       const payload = await r.json();
-      const items = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+      const items = payload.success && Array.isArray(payload.data) ? payload.data : [];
       setProjects(items);
     } catch {
       // ignore
@@ -51,13 +52,6 @@ function SettingsContent() {
             window.location.href = '/';
           }
         }}
-        recentApps={projects.slice(0, 5).map((p: any, i: number) => ({
-          id: p.id || p.project_id || String(i),
-          name: p.name || p.description?.slice(0, 20) || '未命名项目',
-          status: p.status,
-          deployedUrl: p.deployedUrl,
-          dependenciesInstalled: p.dependenciesInstalled,
-        }))}
       />
 
       {/* Settings Content */}

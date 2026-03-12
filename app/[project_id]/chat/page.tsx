@@ -3228,7 +3228,6 @@ const persistProjectPreferences = useCallback(
         {/* App Sidebar */}
         <AppSidebar
           currentPage={sidebarActiveItem}
-          projectsCount={projects.length}
           onNavigate={(page) => {
             if (page === 'settings') {
               setShowGlobalSettings(true);
@@ -3242,13 +3241,6 @@ const persistProjectPreferences = useCallback(
               router.push(`/workspace?view=${page}`);
             }
           }}
-          recentApps={projects.slice(0, 5).map((p: any, i: number) => ({
-            id: p.id || p.project_id || String(i),
-            name: p.name || p.description?.slice(0, 20) || '未命名项目',
-            status: p.status,
-            deployedUrl: p.deployedUrl,
-            dependenciesInstalled: p.dependenciesInstalled,
-          }))}
         />
 
         <div className="h-[calc(100%-16px)] flex-1 flex min-w-0 overflow-hidden relative glass-card m-2 rounded-2xl">
