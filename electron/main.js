@@ -652,7 +652,7 @@ async function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
-      additionalArguments: [`--app-version=${APP_VERSION}`],
+      additionalArguments: [`--app-version=${APP_VERSION}`, '--enable-custom-titlebar'],
     },
   });
 
@@ -1149,7 +1149,7 @@ function registerIpcHandlers() {
           contextIsolation: true,
           nodeIntegration: false,
           spellcheck: false,
-          additionalArguments: [`--app-version=${APP_VERSION}`],
+          additionalArguments: [`--app-version=${APP_VERSION}`, '--enable-custom-titlebar'],
         },
       });
 
