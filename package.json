@@ -290,8 +290,20 @@
         }
       ]
     },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Genvis",
+      "installerIcon": "resources/icon.ico",
+      "uninstallerIcon": "resources/icon.ico",
+      "installerHeaderIcon": "resources/icon.ico"
+    },
     "win": {
       "artifactName": "${productName}-Setup-${version}-x64.${ext}",
+      "icon": "resources/icon.ico",
       "target": [
         {
           "target": "nsis",
