@@ -328,6 +328,30 @@ foreach ($nulPath in $nulFiles) {
 
 Write-Success "Next.js build completed"
 
+# Step 5.5: Pre-build Skills
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Yellow
+Write-Host "Step 5.5/6 : Pre-build Skills" -ForegroundColor Yellow
+Write-Host "========================================" -ForegroundColor Yellow
+Write-Host ""
+
+Write-Info "Auto-detecting skills with prebuild=true in template.json..."
+Write-Info "Running: node scripts/prebuild-skills.js"
+$prebuildResult = & node "scripts/prebuild-skills.js"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Skills pre-build failed"
+    exit 1
+}
+Write-Success "Skills pre-build step completed"
+
+# Clean .next/ from non-prebuilt skills to avoid bloating the package
+Write-Info "Cleaning non-prebuilt skills..."
+& node "scripts/clean-nonprebuilt-skills.js"
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Clean non-prebuilt skills failed, continuing..."
+}
+Write-Success "Non-prebuilt skills cleaned"
+
 # Clean duplicate runtime directories from standalone (handled by extraResources)
 $standaloneRuntimes = @(
     ".next\standalone\git-runtime",
