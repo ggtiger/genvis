@@ -144,6 +144,9 @@ function WorkspaceContent() {
   const autoSendParam = searchParams?.get('auto_send') === 'true';
   const [currentView, setCurrentView] = useState<'home' | 'templates' | 'apps' | 'employees' | 'skills' | 'help' | 'boss' | 'lan-chat'>(viewParam || 'home');
   const [projects, setProjects] = useState<any[]>([]);
+  const [projectsPage, setProjectsPage] = useState(1);
+  const [projectsPageSize] = useState(20);
+  const [projectsTotalPages, setProjectsTotalPages] = useState(1);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [preferredCli, setPreferredCli] = useState<ActiveCliId>(DEFAULT_ACTIVE_CLI);
   const [selectedModel, setSelectedModel] = useState<string>(getDefaultModelForCli(DEFAULT_ACTIVE_CLI));
@@ -358,17 +361,22 @@ function WorkspaceContent() {
   }));
 
   // Load projects (for main content, need all projects)
-  const loadProjects = useCallback(async () => {
+  const loadProjects = useCallback(async (page = 1) => {
     try {
-      const r = await fetch(`${API_BASE}/api/projects`);
+      const r = await fetch(`${API_BASE}/api/projects?page=${page}&pageSize=${projectsPageSize}`);
       if (!r.ok) return;
       const payload = await r.json();
-      const items = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+      const items = Array.isArray(payload?.data?.projects) ? payload.data.projects :
+                     Array.isArray(payload?.data) ? payload.data : [];
       setProjects(items);
+      if (payload?.data?.pagination) {
+        setProjectsTotalPages(payload.data.pagination.totalPages);
+        setProjectsPage(page);
+      }
     } catch (error) {
       console.error('Failed to load projects:', error);
     }
-  }, []);
+  }, [projectsPageSize]);
 
   // Load templates
   const loadTemplates = useCallback(async () => {
@@ -418,7 +426,7 @@ function WorkspaceContent() {
       loadTemplates();
       loadProjects();
     } else if (currentView === 'apps') {
-      loadProjects();
+      loadProjects(1);
       loadSkills();
       loadEmployees();
     } else if (currentView === 'templates') {
@@ -1005,6 +1013,7 @@ function WorkspaceContent() {
                 <p className="text-gray-500 dark:text-slate-400">还没有项目</p>
               </div>
             ) : (
+              <>
               <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
                 {projects
                   .filter((project: any) => {
@@ -1116,6 +1125,30 @@ function WorkspaceContent() {
                   );
                 })}
               </div>
+
+              {/* Pagination */}
+              {projectsTotalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 mt-4 pt-4 border-t border-white/10">
+                  <button
+                    onClick={() => loadProjects(projectsPage - 1)}
+                    disabled={projectsPage <= 1}
+                    className="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-white/50 dark:bg-white/10 hover:bg-white/40 dark:hover:bg-white/20 text-slate-700 dark:text-slate-300"
+                  >
+                    上一页
+                  </button>
+                  <span className="text-sm text-slate-600 dark:text-slate-400">
+                    第 {projectsPage} / {projectsTotalPages} 页
+                  </span>
+                  <button
+                    onClick={() => loadProjects(projectsPage + 1)}
+                    disabled={projectsPage >= projectsTotalPages}
+                    className="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-white/50 dark:bg-white/10 hover:bg-white/40 dark:hover:bg-white/20 text-slate-700 dark:text-slate-300"
+                  >
+                    下一页
+                  </button>
+                </div>
+              )}
+            </>
             )}
           </div>
           </div>

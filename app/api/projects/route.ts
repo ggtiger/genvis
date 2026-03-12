@@ -14,12 +14,38 @@ import { matchDemoKeyword } from '@/lib/services/demo-mode';
 
 /**
  * GET /api/projects
- * Get all projects list
+ * Get projects list with optional pagination
+ * Query params:
+ *   - page: page number (default: 1)
+ *   - pageSize: items per page (default: 20, no pagination if not specified)
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const projects = await getAllProjects();
-    return createSuccessResponse(serializeProjects(projects));
+    const { searchParams } = new URL(request.url);
+    const pageParam = searchParams.get('page');
+    const pageSizeParam = searchParams.get('pageSize');
+
+    // Only paginate if both params are provided
+    const page = pageParam ? parseInt(pageParam) : undefined;
+    const pageSize = pageSizeParam ? parseInt(pageSizeParam) : undefined;
+
+    const result = await getAllProjects(
+      (page !== undefined && pageSize !== undefined)
+        ? { page, pageSize }
+        : undefined
+    );
+
+    // Handle paginated vs non-paginated response
+    if (result && typeof result === 'object' && 'projects' in result) {
+      // Paginated response
+      return createSuccessResponse({
+        projects: serializeProjects(result.projects),
+        pagination: result.pagination,
+      });
+    } else {
+      // Non-paginated response (legacy)
+      return createSuccessResponse(serializeProjects(result as any[]));
+    }
   } catch (error) {
     return handleApiError(error, 'API', 'Failed to fetch projects');
   }

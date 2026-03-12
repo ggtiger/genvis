@@ -13,12 +13,73 @@ import { PROJECTS_DIR_ABSOLUTE } from '@/lib/config/paths';
 import { timelineLogger } from './timeline';
 
 /**
- * Retrieve all projects
+ * Options for paginated project queries
  */
-export async function getAllProjects(): Promise<Project[]> {
+export interface GetProjectsOptions {
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * Paginated projects result
+ */
+export interface PaginatedProjectsResult {
+  projects: Project[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+/**
+ * Retrieve all projects with optional pagination
+ * @param options - Pagination options (page, pageSize)
+ * @returns Paginated result or all projects if no pagination specified
+ */
+export async function getAllProjects(options?: GetProjectsOptions): Promise<PaginatedProjectsResult | Project[]> {
+  // If no pagination options, return all projects (legacy behavior)
+  if (!options || (!options.page && !options.pageSize)) {
+    const result = await db.select()
+      .from(projects)
+      .orderBy(desc(projects.lastActiveAt));
+    return enrichProjectsWithStatus(result);
+  }
+
+  // Paginated query
+  const { page = 1, pageSize = 20 } = options;
+  const offset = (page - 1) * pageSize;
+
+  // Get total count
+  const totalCountResult = await db.select({ count: projects.id }).from(projects);
+  const total = totalCountResult.length;
+
+  // Get paginated results
   const result = await db.select()
     .from(projects)
-    .orderBy(desc(projects.lastActiveAt));
+    .orderBy(desc(projects.lastActiveAt))
+    .limit(pageSize)
+    .offset(offset);
+
+  const enrichedProjects = await enrichProjectsWithStatus(result);
+
+  return {
+    projects: enrichedProjects,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    },
+  };
+}
+
+/**
+ * Enrich projects with runtime status, latest request status, and deployment URLs
+ * Extracted shared logic for both paginated and non-paginated queries
+ */
+async function enrichProjectsWithStatus(result: any[]): Promise<Project[]> {
 
   // 动态导入 previewManager 避免循环依赖
   const { previewManager } = await import('./preview');
