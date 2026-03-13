@@ -4,6 +4,7 @@
  */
 
 import type { PermissionMode } from '@/types/backend/project';
+import path from 'path';
 
 // Permission request stored in globalThis for persistence across hot reloads
 export interface PendingPermission {
@@ -16,6 +17,8 @@ export interface PendingPermission {
   createdAt: number;
   expiresAt: number;
   status: 'pending' | 'approved' | 'denied' | 'expired';
+  /** Security warning when operation targets paths outside allowed scope */
+  securityWarning?: string;
 }
 
 // Internal storage with resolve function (not exported)
@@ -98,7 +101,8 @@ export function addPendingPermissionAndWait(
   projectId: string,
   requestId: string,
   toolName: string,
-  toolInput: Record<string, unknown>
+  toolInput: Record<string, unknown>,
+  securityWarning?: string
 ): { permission: PendingPermission; waitPromise: Promise<boolean> } {
   const store = getPermissionStore();
   const now = Date.now();
@@ -114,6 +118,7 @@ export function addPendingPermissionAndWait(
     createdAt: now,
     expiresAt: now + PERMISSION_TIMEOUT_MS,
     status: 'pending',
+    securityWarning,
   };
 
   const waitPromise = new Promise<boolean>((resolve) => {
@@ -144,6 +149,7 @@ export function addPendingPermissionAndWait(
     createdAt: permission.createdAt,
     expiresAt: permission.expiresAt,
     status: permission.status,
+    securityWarning: permission.securityWarning,
   };
 
   return { permission: publicPermission, waitPromise };
@@ -345,6 +351,134 @@ export function getPermissionModeDescription(mode: PermissionMode): string {
     default:
       return '';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Out-of-scope path detection (security boundary check)
+// ---------------------------------------------------------------------------
+
+/**
+ * Tools that perform destructive or modifying file/command operations.
+ * These are the tools we need to check for out-of-scope path access.
+ */
+const DESTRUCTIVE_TOOLS = new Set([
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+  'Bash',
+  'bash',
+  'run',
+  'shell',
+]);
+
+/**
+ * Extract file paths from tool input for security boundary checking.
+ * Different tools store paths in different fields.
+ */
+function extractPathsFromToolInput(toolName: string, toolInput: Record<string, unknown>): string[] {
+  const paths: string[] = [];
+
+  // Common file path fields
+  const pathFields = ['file_path', 'filePath', 'path', 'file', 'target', 'destination', 'dest'];
+  for (const field of pathFields) {
+    const val = toolInput[field];
+    if (typeof val === 'string' && val.trim()) {
+      paths.push(val.trim());
+    }
+  }
+
+  // Bash/command: extract paths from command string
+  if (toolName === 'Bash' || toolName === 'bash' || toolName === 'run' || toolName === 'shell') {
+    const command = toolInput.command as string | undefined;
+    if (typeof command === 'string') {
+      // Check for rm, mv, cp, etc. with absolute paths
+      const dangerousPatterns = [
+        /\brm\s+(?:-[rfRF]+\s+)?([/~][^\s;|&]+)/g,
+        /\bmv\s+[^\s]+\s+([/~][^\s;|&]+)/g,
+        /\bcp\s+(?:-[rfR]+\s+)?[^\s]+\s+([/~][^\s;|&]+)/g,
+        /\b(?:chmod|chown)\s+[^\s]+\s+([/~][^\s;|&]+)/g,
+        /\b>\s*([/~][^\s;|&]+)/g,  // redirect output to file
+        /\btee\s+(?:-a\s+)?([/~][^\s;|&]+)/g,
+      ];
+      for (const pattern of dangerousPatterns) {
+        let match;
+        while ((match = pattern.exec(command)) !== null) {
+          if (match[1]) paths.push(match[1]);
+        }
+      }
+    }
+  }
+
+  return paths;
+}
+
+/**
+ * Check if a tool operation targets paths outside the allowed scope.
+ * Returns a security warning message if out-of-scope, or null if safe.
+ *
+ * Allowed scopes:
+ * - projectPath: The current project's working directory
+ * - platformPath: The Genvis platform installation directory (process.cwd())
+ *
+ * @param toolName - The tool being invoked
+ * @param toolInput - The tool's input parameters
+ * @param projectPath - Absolute path of the current project
+ * @returns Security warning string if out-of-scope, null if within scope
+ */
+export function checkOutOfScopeOperation(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  projectPath: string
+): string | null {
+  // Only check destructive/modifying tools
+  if (!DESTRUCTIVE_TOOLS.has(toolName)) {
+    return null;
+  }
+
+  const extractedPaths = extractPathsFromToolInput(toolName, toolInput);
+  if (extractedPaths.length === 0) {
+    return null;
+  }
+
+  const normalizedProjectPath = path.resolve(projectPath);
+  const platformPath = path.resolve(process.cwd());
+
+  const outOfScopePaths: string[] = [];
+
+  for (const rawPath of extractedPaths) {
+    // Expand ~ to home directory
+    const expandedPath = rawPath.startsWith('~')
+      ? path.join(process.env.HOME || '/', rawPath.slice(1))
+      : rawPath;
+
+    // Only check absolute paths — relative paths are resolved within project scope by the CLI
+    if (!path.isAbsolute(expandedPath)) {
+      continue;
+    }
+
+    const resolved = path.resolve(expandedPath);
+
+    // Check if within project directory
+    if (resolved === normalizedProjectPath || resolved.startsWith(normalizedProjectPath + path.sep)) {
+      continue;
+    }
+
+    // Check if within platform installation directory
+    if (resolved === platformPath || resolved.startsWith(platformPath + path.sep)) {
+      continue;
+    }
+
+    outOfScopePaths.push(resolved);
+  }
+
+  if (outOfScopePaths.length === 0) {
+    return null;
+  }
+
+  // Build warning message
+  const pathList = outOfScopePaths.map(p => `  • ${p}`).join('\n');
+  return `⚠️ 安全警告：操作超出当前项目范围\n工具 ${toolName} 试图访问以下路径：\n${pathList}\n该路径不在当前项目目录 (${normalizedProjectPath}) 或平台安装目录内。`;
 }
 
 /**

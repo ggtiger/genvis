@@ -29,7 +29,7 @@ import { timelineLogger } from '@/lib/services/timeline';
 import { scaffoldBasicNextApp } from '@/lib/utils/scaffold';
 import type { Query } from '@anthropic-ai/claude-agent-sdk';
 import type { PermissionMode } from '@/types/backend/project';
-import { shouldAutoApprove, logPermissionDecision, addPendingPermissionAndWait } from '@/lib/services/permissions';
+import { shouldAutoApprove, logPermissionDecision, addPendingPermissionAndWait, checkOutOfScopeOperation } from '@/lib/services/permissions';
 
 type ToolAction = 'Edited' | 'Created' | 'Read' | 'Deleted' | 'Generated' | 'Searched' | 'Executed';
 
@@ -1090,13 +1090,40 @@ export async function executeClaude(
 
     // Build canUseTool callback for permission control
     // SDK expects return format: { behavior: 'allow' | 'deny', updatedInput?, message? }
-    const canUseTool = projectPermissionMode !== 'bypassPermissions'
-      ? async (toolName: string, toolInput: Record<string, unknown>) => {
+    // Note: canUseTool now runs for ALL modes (including bypassPermissions) to catch out-of-scope operations
+    const canUseTool = async (toolName: string, toolInput: Record<string, unknown>) => {
           try {
             // CLI mode: deny ALL tools - this mode is advisory only
             if (projectMode === 'cli') {
               console.log(`[ClaudeService] 🚫 CLI mode: blocking tool ${toolName} (advisory only)`);
               return { behavior: 'deny' as const, message: 'CLI模式下禁止执行任何工具，只提供命令行建议' };
+            }
+
+            // Security boundary check: detect out-of-scope operations (applies to ALL modes)
+            const securityWarning = checkOutOfScopeOperation(toolName, toolInput, absoluteProjectPath);
+            if (securityWarning) {
+              console.log(`[ClaudeService] 🚨 Out-of-scope operation detected for ${toolName}: ${securityWarning}`);
+              // Always require user confirmation for out-of-scope operations
+              const { permission: pendingPerm, waitPromise } = addPendingPermissionAndWait(
+                projectId, requestId || '', toolName, toolInput, securityWarning
+              );
+              streamManager.publish(projectId, {
+                type: 'permission_request',
+                data: {
+                  ...pendingPerm,
+                  timestamp: new Date().toISOString(),
+                },
+              });
+              const approved = await waitPromise;
+              console.log(`[ClaudeService] 🚨 Out-of-scope permission ${pendingPerm.id} resolved: ${approved ? 'approved' : 'denied'}`);
+              return approved
+                ? { behavior: 'allow' as const, updatedInput: toolInput }
+                : { behavior: 'deny' as const, message: '用户拒绝了越界操作' };
+            }
+
+            // If bypassPermissions mode and no security warning, auto-approve
+            if (projectPermissionMode === 'bypassPermissions') {
+              return { behavior: 'allow' as const, updatedInput: toolInput };
             }
 
             const autoApprove = shouldAutoApprove(toolName, projectPermissionMode);
@@ -1131,8 +1158,7 @@ export async function executeClaude(
             console.warn(`[ClaudeService] Error in canUseTool (stream likely closed):`, (error as Error).message);
             return { behavior: 'allow' as const, updatedInput: toolInput };
           }
-        }
-      : undefined;
+        };
 
     // Build PreToolUse hook for permission control (SDK format: hooks.PreToolUse[].hooks[])
     // This is the PRIMARY permission gate - canUseTool may not trigger for all tools
@@ -1159,9 +1185,40 @@ export async function executeClaude(
           'sdk.permission.pre_tool'
         ).catch(() => {});
 
-        // Skip permission check if bypassPermissions mode
+        // Skip permission check if bypassPermissions mode — but still check for out-of-scope operations
         if (projectPermissionMode === 'bypassPermissions') {
-          console.log(`[ClaudeService] ✅ PreToolUse: ${toolName} bypassed (全放行模式)`);
+          // Security boundary check even in bypass mode
+          const securityWarning = checkOutOfScopeOperation(toolName, toolInput, absoluteProjectPath);
+          if (securityWarning) {
+            console.log(`[ClaudeService] 🚨 PreToolUse: ${toolName} out-of-scope detected in bypass mode`);
+            timelineLogger.logSDK(
+              projectId,
+              `Security Warning (bypass mode): ${toolName} - out-of-scope operation`,
+              'warn',
+              requestId,
+              { toolName, securityWarning, mode: projectPermissionMode },
+              'sdk.security.out_of_scope'
+            ).catch(() => {});
+
+            // Create pending permission with security warning
+            const { permission: pendingPerm, waitPromise } = addPendingPermissionAndWait(
+              projectId, requestId || '', toolName, toolInput, securityWarning
+            );
+            streamManager.publish(projectId, {
+              type: 'permission_request',
+              data: {
+                ...pendingPerm,
+                timestamp: new Date().toISOString(),
+              },
+            });
+            const approved = await waitPromise;
+            console.log(`[ClaudeService] 🚨 PreToolUse security permission ${pendingPerm.id} resolved: ${approved ? 'approved' : 'denied'}`);
+            if (!approved) {
+              return { decision: 'block', reason: '用户拒绝了越界操作' };
+            }
+          } else {
+            console.log(`[ClaudeService] ✅ PreToolUse: ${toolName} bypassed (全放行模式)`);
+          }
           timelineLogger.logSDK(
             projectId,
             `Permission Bypassed: ${toolName}`,
@@ -1184,6 +1241,26 @@ export async function executeClaude(
         logPermissionDecision(projectId, toolName, projectPermissionMode, autoApprove, toolInput);
 
         if (autoApprove) {
+          // Even auto-approved tools need security boundary check
+          const securityWarning = checkOutOfScopeOperation(toolName, toolInput, absoluteProjectPath);
+          if (securityWarning) {
+            console.log(`[ClaudeService] 🚨 PreToolUse: ${toolName} auto-approved but out-of-scope detected`);
+            const { permission: pendingPerm, waitPromise } = addPendingPermissionAndWait(
+              projectId, requestId || '', toolName, toolInput, securityWarning
+            );
+            streamManager.publish(projectId, {
+              type: 'permission_request',
+              data: {
+                ...pendingPerm,
+                timestamp: new Date().toISOString(),
+              },
+            });
+            const approved = await waitPromise;
+            if (!approved) {
+              return { decision: 'block', reason: '用户拒绝了越界操作' };
+            }
+            return {};
+          }
           console.log(`[ClaudeService] 🔧 PreToolUse: ${toolName} auto-approved`);
           return {};
         }
@@ -1355,13 +1432,11 @@ export async function executeClaude(
       }
     };
 
-    // Build hooks config - always include PostToolUse for result capture
+    // Build hooks config - always include PreToolUse for security boundary check + PostToolUse for result capture
     const hooks = {
-      ...(projectPermissionMode !== 'bypassPermissions' ? {
-        PreToolUse: [{
-          hooks: [preToolUseHook]
-        }]
-      } : {}),
+      PreToolUse: [{
+        hooks: [preToolUseHook]
+      }],
       PostToolUse: [{
         hooks: [postToolUseHook]
       }],

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { Check, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Check, X, ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '';
 
@@ -15,6 +15,7 @@ interface PendingPermission {
   createdAt: number;
   expiresAt: number;
   status: 'pending' | 'approved' | 'denied' | 'expired';
+  securityWarning?: string;
 }
 
 interface PermissionConfirmCardProps {
@@ -90,6 +91,7 @@ export default function PermissionConfirmCard({
   const remainingSeconds = Math.ceil(remainingTime / 1000);
   const toolLabel = TOOL_LABELS[permission.toolName] || permission.toolName;
   const isPending = permission.status === 'pending' && !isHistorical;
+  const hasSecurityWarning = !!permission.securityWarning;
 
   // Status indicator for historical permissions
   const getStatusBadge = () => {
@@ -125,19 +127,33 @@ export default function PermissionConfirmCard({
     <div className="my-2">
       {/* Inline card - flat design with subtle border */}
       <div className={`border rounded-lg p-3 ${
-        isPending
-          ? 'border-gray-300 bg-white/5 dark:bg-white/5'
-          : 'border-white/15 dark:border-white/[0.06] bg-white'
+        hasSecurityWarning
+          ? 'border-red-400 dark:border-red-500/60 bg-red-50/80 dark:bg-red-950/20'
+          : isPending
+            ? 'border-gray-300 bg-white/5 dark:bg-white/5'
+            : 'border-white/15 dark:border-white/[0.06] bg-white'
       }`}>
         {/* Header row */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-800 dark:text-white">
+            {hasSecurityWarning && (
+              <ShieldAlert className="h-4 w-4 text-red-500 dark:text-red-400 flex-shrink-0" />
+            )}
+            <span className={`text-sm font-medium ${
+              hasSecurityWarning
+                ? 'text-red-700 dark:text-red-300'
+                : 'text-slate-800 dark:text-white'
+            }`}>
               {toolLabel}
             </span>
-            {isPending && (
+            {isPending && !hasSecurityWarning && (
               <span className="text-xs text-slate-500 dark:text-slate-400">
                 需要确认
+              </span>
+            )}
+            {isPending && hasSecurityWarning && (
+              <span className="text-xs font-medium text-red-600 dark:text-red-400">
+                越界操作 · 需要确认
               </span>
             )}
             {getStatusBadge()}
@@ -150,6 +166,15 @@ export default function PermissionConfirmCard({
             </span>
           )}
         </div>
+
+        {/* Security warning banner */}
+        {hasSecurityWarning && (
+          <div className="mt-2 p-2 bg-red-100/80 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-xs">
+            <pre className="text-red-700 dark:text-red-300 whitespace-pre-wrap break-all">
+              {permission.securityWarning}
+            </pre>
+          </div>
+        )}
 
         {/* Preview toggle */}
         {permission.inputPreview && (
