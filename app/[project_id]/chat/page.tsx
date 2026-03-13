@@ -3045,7 +3045,11 @@ const persistProjectPreferences = useCallback(
 
   // React to global settings changes when using global defaults
   const { settings: globalSettings } = useGlobalSettings();
-  const { bgUrl, bgCss, primaryHex } = useTheme();
+  const { bgUrl, bgCss, primaryHex, theme, toggleTheme } = useTheme();
+
+  // Track client mount to avoid hydration mismatch
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
   useEffect(() => {
     if (!usingGlobalDefaults) return;
     if (!globalSettings) return;
@@ -3224,10 +3228,13 @@ const persistProjectPreferences = useCallback(
       <div className="h-screen flex items-center justify-center p-0 md:p-0 overflow-hidden">
       {/* Animated Background */}
       <AnimatedBackground bgUrl={bgUrl} bgCss={bgCss} />
-      <div className="glass flex h-full w-full max-w-[1600px] rounded-none md:rounded-3xl shadow-2xl overflow-hidden relative">
+      <div className="glass flex h-full w-full max-w-[1600px] rounded-none md:rounded-2xl shadow-2xl overflow-hidden relative">
         {/* App Sidebar */}
         <AppSidebar
           currentPage={sidebarActiveItem}
+          theme={theme}
+          mounted={mounted}
+          onToggleTheme={toggleTheme}
           onNavigate={(page) => {
             if (page === 'settings') {
               setShowGlobalSettings(true);
