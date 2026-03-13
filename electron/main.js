@@ -645,6 +645,7 @@ async function createMainWindow() {
     backgroundColor: '#111827',
     frame: false,
     titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'defaultOverlay',
+    trafficLightPosition: { x: 25, y: 15 },
     title: `G.E.N.V.I.S 预览版 V${APP_VERSION}`,
     webPreferences: {
       preload: preloadPath,
@@ -712,7 +713,7 @@ async function createMainWindow() {
         backgroundColor: '#ffffff',
         frame: false,
         titleBarStyle: 'hidden',
-        trafficLightPosition: { x: 12, y: 12 },
+        trafficLightPosition: { x: 25, y: 15 },
         webPreferences: {
           preload: preloadPath,
           contextIsolation: true,
@@ -1141,6 +1142,7 @@ function registerIpcHandlers() {
         backgroundColor: '#111827',
         frame: false,
         titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'defaultOverlay',
+        trafficLightPosition: { x: 25, y: 15 },
         title: `G.E.N.V.I.S 预览版 V${APP_VERSION}`,
         webPreferences: {
           preload: preloadPath,
