@@ -85,8 +85,10 @@
     overflow: hidden;
     -webkit-app-region: drag;
     user-select: none;
-    border-radius: 12px;
     position: relative;
+    /* Windows transparent window border-radius fix using clip-path */
+    clip-path: inset(0 0 0 0 round 12px);
+    -webkit-clip-path: inset(0 0 0 0 round 12px);
   }
 
   canvas#particles {

@@ -172,6 +172,9 @@
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.2);
     transition: transform 0.2s ease, background 0.2s ease;
+    /* Performance optimization for scroll */
+    transform: translateZ(0);
+    will-change: transform;
   }
   /* 亮色模式下 .glass-card 内的所有 slate 颜色强制为深色 */
   :root:not(.dark):not(.spring) .glass-card :is(

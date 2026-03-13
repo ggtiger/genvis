@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, memo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles, AlertTriangle, X } from 'lucide-react';
 import SkillDetailPanel from '@/components/skills/SkillDetailPanel';
@@ -14,6 +14,110 @@ const formatSize = (bytes: number) => {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 };
+
+// Memoized skill card component to prevent unnecessary re-renders
+interface SkillCardProps {
+  skill: SkillMeta & { enabled?: boolean; hasUnfilledRequiredVars?: boolean };
+  onClick: () => void;
+  onToggleEnabled: (enabled: boolean) => void;
+  onRun: () => void;
+}
+
+const SkillCard = memo(({ skill, onClick, onToggleEnabled, onRun }: SkillCardProps) => {
+  const handleToggleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleEnabled(!skill.enabled);
+  }, [skill.enabled, onToggleEnabled]);
+
+  const handleRunClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onRun();
+  }, [onRun]);
+
+  return (
+    <div
+      className={`glass-card rounded-2xl p-4 group cursor-pointer ${!skill.enabled ? 'opacity-60' : ''}`}
+      onClick={onClick}
+    >
+      <div className="mb-3">
+        <div className="flex items-center gap-2 mb-1">
+          <h3 className="font-semibold text-gray-900 dark:text-white text-base truncate">
+            {skill.displayName || skill.name}
+          </h3>
+          <span className={`text-xs px-2 py-0.5 rounded ${
+            skill.source === 'builtin' ? 'bg-blue-50 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400' : 'bg-white/50 dark:bg-white/10 text-gray-600 dark:text-gray-300'
+          }`}>
+            {skill.source === 'builtin' ? '内置' : '导入'}
+          </span>
+          {skill.hasSkill && (
+            <span className="text-xs px-2 py-0.5 rounded bg-green-50 dark:bg-green-500/20 text-green-600 dark:text-green-400">Skills</span>
+          )}
+          {skill.hasApp && (
+            <span className="text-xs px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400">App</span>
+          )}
+          {skill.deployStatus === 'deployed' && (
+            <span className="text-xs px-2 py-0.5 rounded bg-green-50 dark:bg-green-500/20 text-green-700 dark:text-green-400 font-medium">
+              已部署{skill.deployPort ? ` :${skill.deployPort}` : ''}
+            </span>
+          )}
+          {skill.deployStatus === 'building' && (
+            <span className="text-xs px-2 py-0.5 rounded bg-yellow-50 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 font-medium">构建中</span>
+          )}
+          {skill.deployStatus === 'stopped' && (
+            <span className="text-xs px-2 py-0.5 rounded bg-white/50 dark:bg-white/10 text-gray-600 dark:text-gray-300 font-medium">已停止</span>
+          )}
+          {skill.deployStatus === 'build_failed' && (
+            <span className="text-xs px-2 py-0.5 rounded bg-red-50 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-medium">构建失败</span>
+          )}
+        </div>
+        {skill.description && (
+          <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 mb-2">{skill.description}</p>
+        )}
+        <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
+          {skill.author && (<><span>作者: {skill.author}</span><span>·</span></>)}
+          {skill.version && (<><span>v{skill.version}</span><span>·</span></>)}
+          <span>大小: {formatSize(skill.size)}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        {skill.hasUnfilledRequiredVars && (
+          <span className="relative group/warning cursor-help" title="有必填的环境变量未配置">
+            <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
+          </span>
+        )}
+        {skill.hasSkill && (
+          <button
+            onClick={handleToggleClick}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              skill.enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+            }`}
+            title={skill.enabled ? '点击禁用' : '点击启用'}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+              skill.enabled ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
+        )}
+        <button
+          onClick={onClick}
+          className="px-3 py-1.5 bg-white/50 dark:bg-white/10 hover:bg-white/60 dark:hover:bg-white/15 text-gray-700 dark:text-gray-200 text-sm font-medium rounded transition-colors"
+        >
+          设置
+        </button>
+        {skill.hasApp && skill.deployStatus !== 'deployed' && skill.deployStatus !== 'building' && (
+          <button
+            onClick={handleRunClick}
+            className="px-3 py-1.5 bg-gray-900 dark:bg-white/15 hover:bg-gray-800 dark:hover:bg-white/20 text-white dark:text-gray-100 text-sm font-medium rounded transition-all opacity-0 group-hover:opacity-100"
+          >
+            运行
+          </button>
+        )}
+      </div>
+    </div>
+  );
+});
+
+SkillCard.displayName = 'SkillCard';
 
 export default function SkillsSettings() {
   const router = useRouter();
@@ -333,87 +437,14 @@ export default function SkillsSettings() {
                 return true;
               })
               .map((skill) => (
-              <div
-                key={skill.name}
-                className={`glass-card rounded-2xl p-4 group cursor-pointer ${!skill.enabled ? 'opacity-60' : ''}`}
-                onClick={() => setSelectedSkillName(skill.name)}
-              >
-                <div className="mb-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-semibold text-gray-900 dark:text-white text-base truncate">
-                      {skill.displayName || skill.name}
-                    </h3>
-                    <span className={`text-xs px-2 py-0.5 rounded ${
-                      skill.source === 'builtin' ? 'bg-blue-50 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400' : 'bg-white/50 dark:bg-white/10 text-gray-600 dark:text-gray-300'
-                    }`}>
-                      {skill.source === 'builtin' ? '内置' : '导入'}
-                    </span>
-                    {skill.hasSkill && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-green-50 dark:bg-green-500/20 text-green-600 dark:text-green-400">Skills</span>
-                    )}
-                    {skill.hasApp && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400">App</span>
-                    )}
-                    {skill.deployStatus === 'deployed' && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-green-50 dark:bg-green-500/20 text-green-700 dark:text-green-400 font-medium">
-                        已部署{skill.deployPort ? ` :${skill.deployPort}` : ''}
-                      </span>
-                    )}
-                    {skill.deployStatus === 'building' && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-yellow-50 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 font-medium">构建中</span>
-                    )}
-                    {skill.deployStatus === 'stopped' && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-white/50 dark:bg-white/10 text-gray-600 dark:text-gray-300 font-medium">已停止</span>
-                    )}
-                    {skill.deployStatus === 'build_failed' && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-red-50 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-medium">构建失败</span>
-                    )}
-                  </div>
-                  {skill.description && (
-                    <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 mb-2">{skill.description}</p>
-                  )}
-                  <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
-                    {skill.author && (<><span>作者: {skill.author}</span><span>·</span></>)}
-                    {skill.version && (<><span>v{skill.version}</span><span>·</span></>)}
-                    <span>大小: {formatSize(skill.size)}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  {skill.hasUnfilledRequiredVars && (
-                    <span className="relative group/warning cursor-help" title="有必填的环境变量未配置">
-                      <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                    </span>
-                  )}
-                  {skill.hasSkill && (
-                    <button
-                      onClick={() => toggleSkillEnabled(skill.name, !skill.enabled)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        skill.enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
-                      }`}
-                      title={skill.enabled ? '点击禁用' : '点击启用'}
-                    >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        skill.enabled ? 'translate-x-6' : 'translate-x-1'
-                      }`} />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setSelectedSkillName(skill.name)}
-                    className="px-3 py-1.5 bg-white/50 dark:bg-white/10 hover:bg-white/60 dark:hover:bg-white/15 text-gray-700 dark:text-gray-200 text-sm font-medium rounded transition-colors"
-                  >
-                    设置
-                  </button>
-                  {skill.hasApp && skill.deployStatus !== 'deployed' && skill.deployStatus !== 'building' && (
-                    <button
-                      onClick={() => handleRunSkill(skill.name)}
-                      className="px-3 py-1.5 bg-gray-900 dark:bg-white/15 hover:bg-gray-800 dark:hover:bg-white/20 text-white dark:text-gray-100 text-sm font-medium rounded transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      运行
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+                <SkillCard
+                  key={skill.name}
+                  skill={skill}
+                  onClick={() => setSelectedSkillName(skill.name)}
+                  onToggleEnabled={(enabled) => toggleSkillEnabled(skill.name, enabled)}
+                  onRun={() => handleRunSkill(skill.name)}
+                />
+              ))}
           </div>
         )}
       </div>

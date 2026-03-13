@@ -35,6 +35,9 @@ function SettingsContent() {
       style={{
         background: "url('https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&q=80&w=2070') no-repeat center center fixed",
         backgroundSize: 'cover',
+        // Performance optimization for scroll
+        transform: 'translateZ(0)',
+        willChange: 'transform',
       }}
     >
       <div className="flex h-full w-full max-w-[1600px] glass rounded-none md:rounded-2xl shadow-xl overflow-hidden">
