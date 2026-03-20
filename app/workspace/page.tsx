@@ -790,7 +790,7 @@ function WorkspaceContent() {
               {/* Main Chat Area */}
               <main className="flex-1 flex flex-col relative min-w-0 overflow-hidden glass-card m-2 rounded-2xl h-[calc(100%-16px)]">
                 {/* Header */}
-                <header className="h-16 flex items-center justify-between px-8 backdrop-blur-md border-b border-white/10 z-10 sticky top-0">
+                <header className="h-16 flex items-center justify-between px-8 border-b border-white/10 z-10 sticky top-0">
                   <div className="flex items-center gap-3">
                     <span className="font-semibold text-lg text-slate-900 dark:text-slate-100"></span>
                     {(() => {
@@ -958,7 +958,7 @@ function WorkspaceContent() {
         {currentView === 'apps' && (
           <div className="flex-1 flex flex-col overflow-hidden glass-card m-2 rounded-2xl h-[calc(100%-16px)]">
             {/* Header with back button */}
-            <header className="h-14 flex items-center justify-between px-6 shrink-0 backdrop-blur-md border-b border-white/10">
+            <header className="h-14 flex items-center justify-between px-6 shrink-0 border-b border-white/10">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
@@ -1158,7 +1158,7 @@ function WorkspaceContent() {
         {currentView === 'employees' && (
           <div className="flex-1 flex flex-col overflow-hidden glass-card m-2 rounded-2xl h-[calc(100%-16px)]">
             {/* Header with back button */}
-            <header className="h-14 flex items-center justify-between px-6 shrink-0 backdrop-blur-md border-b border-white/10">
+            <header className="h-14 flex items-center justify-between px-6 shrink-0 border-b border-white/10">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
@@ -1248,7 +1248,7 @@ function WorkspaceContent() {
         {/* LAN Chat View */}
         {currentView === 'lan-chat' && (
           <div className="flex-1 flex flex-col overflow-hidden glass-card m-2 rounded-2xl h-[calc(100%-16px)]">
-            <header className="h-14 flex items-center justify-between px-6 shrink-0 backdrop-blur-md border-b border-white/10">
+            <header className="h-14 flex items-center justify-between px-6 shrink-0 border-b border-white/10">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {

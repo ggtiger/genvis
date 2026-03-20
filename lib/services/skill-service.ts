@@ -394,14 +394,9 @@ async function ensureSkillInUserDir(builtinSkillPath: string, skillName: string)
  * Only runs on first install or when app version changes
  */
 export async function initializeBuiltinSkills(): Promise<void> {
-  // Check if builtin skills need to be copied (version check from extended config)
   const currentVersion = getAppVersion();
   const extendedConfig = await readSkillExtendedConfig();
-
-  if (extendedConfig.builtinVersion === currentVersion) {
-    console.log(`[SkillService] Builtin skills already initialized for version ${currentVersion}`);
-    return;
-  }
+  const isVersionMatch = extendedConfig.builtinVersion === currentVersion;
 
   if (!fsSync.existsSync(SKILLS_DIR_ABSOLUTE)) {
     console.log('[SkillService] Builtin skills directory not found, skipping initialization');
@@ -409,27 +404,40 @@ export async function initializeBuiltinSkills(): Promise<void> {
   }
 
   try {
-    console.log(`[SkillService] Initializing builtin skills for version ${currentVersion}...`);
     const entries = await fs.readdir(SKILLS_DIR_ABSOLUTE, { withFileTypes: true });
     const prebuiltSkills: string[] = [];
+    let copiedCount = 0;
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
 
       const skillPath = path.join(SKILLS_DIR_ABSOLUTE, entry.name);
-      const skillMdPath = path.join(skillPath, 'SKILL.md');
+      const hasSkillMd = fsSync.existsSync(path.join(skillPath, 'SKILL.md'));
 
-      if (fsSync.existsSync(skillMdPath)) {
+      // Only accept skills with SKILL.md
+      if (!hasSkillMd) continue;
+
+      const targetDir = path.join(USER_SKILLS_DIR_ABSOLUTE, entry.name);
+      const targetExists = fsSync.existsSync(targetDir);
+
+      // Copy if: target doesn't exist (new skill) OR version changed (update all)
+      if (!targetExists || !isVersionMatch) {
         await ensureSkillInUserDir(skillPath, entry.name);
+        copiedCount++;
+      }
 
-        // Detect pre-built skills (have .prebuild-manifest.json)
-        const manifestPath = path.join(skillPath, '.prebuild-manifest.json');
-        if (fsSync.existsSync(manifestPath)) {
-          prebuiltSkills.push(entry.name);
-        }
+      // Detect pre-built skills (have .prebuild-manifest.json)
+      const manifestPath = path.join(skillPath, '.prebuild-manifest.json');
+      if (fsSync.existsSync(manifestPath)) {
+        prebuiltSkills.push(entry.name);
       }
     }
-    console.log('[SkillService] Builtin skills initialization completed');
+
+    if (copiedCount > 0) {
+      console.log(`[SkillService] Copied ${copiedCount} builtin skill(s) to user-skills`);
+    } else if (isVersionMatch) {
+      console.log(`[SkillService] Builtin skills up-to-date for version ${currentVersion}`);
+    }
 
     // Register pre-built skills as deployed so they auto-start
     if (prebuiltSkills.length > 0) {
@@ -634,6 +642,38 @@ async function parseTemplateJson(skillPath: string): Promise<TemplateConfig | nu
 }
 
 /**
+ * Extract envVars from SKILL.md frontmatter data.
+ * Supports two formats:
+ * 1. Top-level: envVars: [{key, label, required, secret, ...}]
+ * 2. Nested openclaw: metadata.openclaw.requires.env: ["KEY1", "KEY2"]
+ */
+function extractEnvVars(data: Record<string, unknown>): EnvVarConfig[] | undefined {
+  // Format 1: top-level envVars array
+  if (Array.isArray(data.envVars) && data.envVars.length > 0) {
+    return data.envVars as EnvVarConfig[];
+  }
+
+  // Format 2: metadata.openclaw.requires.env (ClawHub format)
+  const metadata = data.metadata as Record<string, unknown> | undefined;
+  if (metadata && typeof metadata === 'object') {
+    const nested = (metadata.openclaw ?? metadata.clawdbot ?? metadata.clawdis) as Record<string, unknown> | undefined;
+    if (nested && typeof nested === 'object') {
+      const requires = nested.requires as Record<string, unknown> | undefined;
+      if (requires?.env && Array.isArray(requires.env) && requires.env.length > 0) {
+        return (requires.env as string[]).map((key: string) => ({
+          key,
+          label: key,
+          required: true,
+          secret: true,
+        }));
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Parse SKILL.md frontmatter
  */
 async function parseSkillMd(skillPath: string): Promise<{
@@ -646,6 +686,7 @@ async function parseSkillMd(skillPath: string): Promise<{
   author?: string;
   preview?: string;
   projectType?: 'nextjs' | 'python-fastapi';
+  envVars?: EnvVarConfig[];
 } | null> {
   const skillMdPath = path.join(skillPath, 'SKILL.md');
   try {
@@ -662,6 +703,7 @@ async function parseSkillMd(skillPath: string): Promise<{
         author: data.author ? String(data.author) : undefined,
         preview: data.preview ? String(data.preview) : undefined,
         projectType: data.projectType as 'nextjs' | 'python-fastapi' | undefined,
+        envVars: extractEnvVars(data),
       };
     }
     return null;
@@ -713,6 +755,7 @@ async function parseSkillDir(skillPath: string, dirName: string): Promise<Parsed
     author: skillMdData!.author,
     preview: skillMdData!.preview,
     projectType: skillMdData!.projectType,
+    envVars: skillMdData!.envVars,
     hasSkill,
     hasApp,
   };

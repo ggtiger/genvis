@@ -17,9 +17,9 @@ export function SettingsModal({ isOpen, onClose, title, icon, children }: Settin
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       
-      <div className="absolute inset-y-0 right-0 max-w-3xl w-full bg-white/90 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl flex flex-col">
+      <div className="absolute inset-y-0 right-0 max-w-3xl w-full bg-white/95 dark:bg-slate-900/98 shadow-2xl flex flex-col">
         {/* Header */}
         <div className="px-6 py-5 bg-white/50 dark:bg-white/[0.04] border-b border-gray-200 dark:border-white/10">
           <div className="flex items-center justify-between">

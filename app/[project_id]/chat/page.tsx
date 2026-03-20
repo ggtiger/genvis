@@ -3253,7 +3253,7 @@ const persistProjectPreferences = useCallback(
         <div className="h-[calc(100%-16px)] flex-1 flex min-w-0 overflow-hidden relative glass-card m-2 rounded-2xl">
           {/* Mobile view toggle - fixed at top, always visible */}
           {isMobileDevice && (
-            <div className="absolute top-0 left-0 right-0 z-50 bg-white/30 dark:bg-slate-900/30 backdrop-blur-md border-b border-white/10 px-4 py-2 flex items-center justify-center gap-1">
+            <div className="absolute top-0 left-0 right-0 z-50 bg-white/30 dark:bg-slate-900/30 bg-white/60 dark:bg-slate-900/60 border-b border-white/10 px-4 py-2 flex items-center justify-center gap-1">
               <button
                 onClick={() => setMobileViewMode('chat')}
                 className={`flex-1 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
@@ -3294,7 +3294,7 @@ const persistProjectPreferences = useCallback(
             {currentView === 'chat' && (
               <>
             {/* Chat header */}
-            <div className="bg-white/30 dark:bg-white/[0.06] backdrop-blur-md border-b border-white/20 dark:border-white/[0.06] px-4 h-12 flex items-center">
+            <div className="bg-white/30 dark:bg-white/[0.06] bg-white/60 dark:bg-slate-900/60 border-b border-white/20 dark:border-white/[0.06] px-4 h-12 flex items-center">
               {/* Left: Back button */}
               <button
                 onClick={() => {
@@ -3685,7 +3685,7 @@ const persistProjectPreferences = useCallback(
             {/* Content area */}
             <div className="flex-1 min-h-0 flex flex-col">
               {/* Controls Bar */}
-              <div className="bg-white/30 dark:bg-white/[0.06] backdrop-blur-md border-b border-white/20 dark:border-white/[0.06] px-3 h-12 flex items-center relative">
+              <div className="bg-white/30 dark:bg-white/[0.06] bg-white/60 dark:bg-slate-900/60 border-b border-white/20 dark:border-white/[0.06] px-3 h-12 flex items-center relative">
                 <div className="flex items-center gap-2">
                   {/* Back button - show in fullscreen mode */}
                   {previewMode === 'fullscreen' && (
@@ -4076,7 +4076,7 @@ const persistProjectPreferences = useCallback(
                     className="h-full flex flex-col bg-white/10 dark:bg-black/5"
                   >
                     {/* Settings Header with Tabs */}
-                    <div className="border-b border-white/20 dark:border-white/[0.06] bg-white/30 dark:bg-white/[0.06] backdrop-blur-md">
+                    <div className="border-b border-white/20 dark:border-white/[0.06] bg-white/30 dark:bg-white/[0.06] bg-white/60 dark:bg-slate-900/60">
                       <div className="flex gap-2 p-4">
                         <button
                           onClick={() => setSettingsActiveTab('general')}
@@ -4129,7 +4129,7 @@ const persistProjectPreferences = useCallback(
                     className="h-full flex flex-col bg-white/10 dark:bg-black/5"
                   >
                     {/* Console Header */}
-                    <div className="flex items-center justify-between px-4 py-2 bg-white/30 dark:bg-white/[0.06] backdrop-blur-md border-b border-white/20 dark:border-white/[0.06]">
+                    <div className="flex items-center justify-between px-4 py-2 bg-white/30 dark:bg-white/[0.06] bg-white/60 dark:bg-slate-900/60 border-b border-white/20 dark:border-white/[0.06]">
                       <div className="flex items-center gap-2">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="text-green-600 dark:text-green-400" strokeWidth="2">
                           <polyline points="4 17 10 11 4 5"></polyline>
@@ -5324,7 +5324,7 @@ const persistProjectPreferences = useCallback(
           onClick={() => setShowQRCode(false)}
         >
           <div
-            className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-xl p-6 shadow-2xl max-w-sm w-full"
+            className="bg-white/95 dark:bg-slate-900/95 rounded-xl p-6 shadow-2xl max-w-sm w-full"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-6">

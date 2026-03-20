@@ -325,7 +325,7 @@ export default function AppSidebar({
                   <span className={`w-1.5 h-1.5 rounded-full ${app.color || 'bg-gray-300'} shrink-0`} />
                   <span className="truncate flex-1" title={app.name}>{app.name}</span>
                   {app.statusLabel && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 backdrop-blur-md text-auto-contrast ${
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 text-auto-contrast ${
                       app.statusLabel === '运行中' ? 'text-green-800 bg-green-500/20' :
                       app.statusLabel === '启动中' ? 'text-yellow-800 bg-yellow-500/20' :
                       app.statusLabel === '失败' ? 'text-red-800 bg-red-500/20' :

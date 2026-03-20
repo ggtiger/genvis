@@ -140,7 +140,7 @@ export default function LocalDeployPage({ skillName, onClose, onCopyErrorToChat 
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-white/10 bg-white/30 dark:bg-white/[0.06] backdrop-blur-md flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-white/10 bg-white/60 dark:bg-white/[0.12] flex-shrink-0">
         <div className="flex items-center gap-2">
           <Terminal className="w-4 h-4 text-gray-500 dark:text-slate-400" />
           <h2 className="text-sm font-semibold text-gray-900 dark:text-white">本地部署</h2>

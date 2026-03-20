@@ -309,9 +309,9 @@ export default function DiffViewer({ projectId, filePath, diff, from, to, onClos
   }, [onClose, navigateChange]);
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
-        className="rounded-xl shadow-2xl flex flex-col w-[90vw] max-w-5xl h-[80vh] overflow-hidden bg-white/80 dark:bg-slate-900/90 backdrop-blur-2xl border border-white/30 dark:border-white/10"
+        className="rounded-xl shadow-2xl flex flex-col w-[90vw] max-w-5xl h-[80vh] overflow-hidden bg-white/95 dark:bg-slate-900/95 border border-white/30 dark:border-white/10"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}

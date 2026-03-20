@@ -83,7 +83,7 @@ export default function GroupChatPanel({ group, peers }: GroupChatPanelProps) {
   return (
     <div className="flex-1 flex flex-col h-full">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-border-subtle flex items-center justify-between bg-white/30 dark:bg-slate-900/30 backdrop-blur-sm">
+      <div className="px-6 py-4 border-b border-border-subtle flex items-center justify-between bg-white/60 dark:bg-slate-900/60">
         <div>
           <h2 className="text-base font-semibold text-text-main">{group.name}</h2>
           <p className="text-xs text-text-secondary">{group.members.length} 位成员</p>

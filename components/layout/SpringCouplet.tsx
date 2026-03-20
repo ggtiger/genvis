@@ -37,18 +37,18 @@ export default function SpringCouplet() {
         .spring-scroll {
           background: linear-gradient(180deg, #700000 0%, #b91c1c 6%, #dc2626 12%, #dc2626 88%, #b91c1c 94%, #700000 100%);
           border: 3px solid #fbbf24;
-          box-shadow: 0 0 16px rgba(255,215,0,0.4), inset 0 0 10px rgba(0,0,0,0.25);
+          box-shadow: 0 0 8px rgba(255,215,0,0.3), inset 0 0 6px rgba(0,0,0,0.2);
           border-radius: 8px;
         }
         .spring-banner {
           background: linear-gradient(90deg, #700000 0%, #dc2626 12%, #dc2626 88%, #700000 100%);
           border: 3px solid #fbbf24;
-          box-shadow: 0 0 16px rgba(255,215,0,0.4), inset 0 0 10px rgba(0,0,0,0.25);
+          box-shadow: 0 0 8px rgba(255,215,0,0.3), inset 0 0 6px rgba(0,0,0,0.2);
           border-radius: 6px;
         }
         .spring-text {
           color: #ffd700;
-          text-shadow: 0 0 12px rgba(255,215,0,0.6), 0 0 24px rgba(255,215,0,0.3), 2px 2px 3px rgba(0,0,0,0.6);
+          text-shadow: 0 0 6px rgba(255,215,0,0.4), 1px 1px 2px rgba(0,0,0,0.5);
           font-family: KaiTi, STKaiti, "楷体", SimSun, serif;
         }
       `}</style>
@@ -119,7 +119,7 @@ export default function SpringCouplet() {
             style={{
               background: 'radial-gradient(ellipse at center, rgba(139,0,0,0.95) 0%, rgba(100,0,0,0.9) 100%)',
               border: '3px solid #fbbf24',
-              boxShadow: '0 0 30px rgba(255,215,0,0.4), 0 0 60px rgba(255,0,0,0.2)',
+              boxShadow: '0 0 12px rgba(255,215,0,0.3)',
               transform: showBlessing ? 'scale(1)' : 'scale(0.8)',
               transition: 'transform 0.6s cubic-bezier(0.25, 1, 0.5, 1)',
               maxWidth: '280px',

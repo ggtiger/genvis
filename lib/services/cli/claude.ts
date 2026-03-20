@@ -1041,9 +1041,16 @@ export async function executeClaude(
     envWithBuiltinNode.GOODABLE_API_BASE = `http://localhost:${webPort}`;
     console.log(`[ClaudeService] 🔧 Set GOODABLE_API_BASE: ${envWithBuiltinNode.GOODABLE_API_BASE}`);
 
-    // Inject PLATFORM_ROOT_DIR so employees (e.g. generalist) can locate data/user-skills/ etc.
+    // Inject PLATFORM_ROOT_DIR so employees (e.g. generalist) can locate skill directories
     envWithBuiltinNode.PLATFORM_ROOT_DIR = process.cwd();
     console.log(`[ClaudeService] 🔧 Set PLATFORM_ROOT_DIR: ${envWithBuiltinNode.PLATFORM_ROOT_DIR}`);
+
+    // Inject resolved skill directory paths (correct in both dev and production)
+    const { USER_SKILLS_DIR_ABSOLUTE, SKILLS_DIR_ABSOLUTE } = await import('@/lib/config/paths');
+    envWithBuiltinNode.USER_SKILLS_DIR = USER_SKILLS_DIR_ABSOLUTE;
+    envWithBuiltinNode.BUILTIN_SKILLS_DIR = SKILLS_DIR_ABSOLUTE;
+    console.log(`[ClaudeService] 🔧 Set USER_SKILLS_DIR: ${USER_SKILLS_DIR_ABSOLUTE}`);
+    console.log(`[ClaudeService] 🔧 Set BUILTIN_SKILLS_DIR: ${SKILLS_DIR_ABSOLUTE}`);
 
     // Inject AI services environment variables
     try {

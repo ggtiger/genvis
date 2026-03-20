@@ -10,7 +10,7 @@ export default function LanChatPage() {
   return (
     <div className="h-screen flex items-center justify-center p-0 md:p-0 overflow-hidden">
       <div className="glass flex flex-col h-full w-full rounded-none md:rounded-3xl shadow-2xl overflow-hidden relative">
-        <header className="h-14 flex items-center px-6 shrink-0 backdrop-blur-md border-b border-white/10">
+        <header className="h-14 flex items-center px-6 shrink-0 border-b border-white/10">
           <div className="flex items-center gap-2">
             <button
               onClick={() => router.push('/workspace')}

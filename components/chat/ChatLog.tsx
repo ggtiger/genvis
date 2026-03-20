@@ -3304,7 +3304,7 @@ const ToolResultMessage = ({
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.9 }}
         >
-          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-lg p-6 max-w-4xl max-h-[80vh] overflow-auto border border-white/15 dark:border-white/[0.06] ">
+          <div className="bg-white/95 dark:bg-slate-900/95 rounded-lg p-6 max-w-4xl max-h-[80vh] overflow-auto border border-white/15 dark:border-white/[0.06] ">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-slate-800 dark:text-white ">Log Details</h3>
             <button
@@ -3487,7 +3487,7 @@ const ToolResultMessage = ({
                 {message.role === 'user' ? (
                   // User message - boxed on the right
                   <div className="flex justify-end">
-                    <div className="max-w-[80%] bg-white/40 dark:bg-white/10 backdrop-blur-sm rounded-lg px-4 py-3">
+                    <div className="max-w-[80%] bg-white/60 dark:bg-white/15 rounded-lg px-4 py-3">
                       <div className="text-sm text-slate-800 dark:text-white break-words">
                         {(() => {
                           const cleanedMessage = cleanUserMessage(messageText);

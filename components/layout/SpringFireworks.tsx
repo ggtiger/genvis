@@ -49,7 +49,7 @@ export default function SpringFireworks() {
     const particles: Particle[] = [];
 
     function burst(cx: number, cy: number) {
-      const count = 40 + Math.random() * 30;
+      const count = 20 + Math.random() * 15;
       const baseColor = colors[Math.floor(Math.random() * colors.length)];
       for (let i = 0; i < count; i++) {
         const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.3;
@@ -71,11 +71,18 @@ export default function SpringFireworks() {
     let timer = 0;
     const autoLaunch = () => {
       burst(w * 0.15 + Math.random() * w * 0.7, h * 0.1 + Math.random() * h * 0.5);
-      timer = window.setTimeout(autoLaunch, 2000 + Math.random() * 3000);
+      timer = window.setTimeout(autoLaunch, 3000 + Math.random() * 4000);
     };
-    timer = window.setTimeout(autoLaunch, 500);
+    timer = window.setTimeout(autoLaunch, 800);
 
-    function animate() {
+    const FRAME_MS = 42; // ~24fps
+    let lastFrame = 0;
+    function animate(now: number) {
+      if (now - lastFrame < FRAME_MS) {
+        animRef.current = requestAnimationFrame(animate);
+        return;
+      }
+      lastFrame = now;
       ctx!.clearRect(0, 0, w, h);
 
       for (let i = particles.length - 1; i >= 0; i--) {
@@ -98,21 +105,11 @@ export default function SpringFireworks() {
           ctx!.fill();
         }
 
-        // Draw particle
+        // Draw particle (no glow gradient for GPU perf)
         ctx!.beginPath();
         ctx!.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx!.fillStyle = p.color;
         ctx!.globalAlpha = p.alpha;
-        ctx!.fill();
-
-        // Glow
-        ctx!.beginPath();
-        ctx!.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
-        const grad = ctx!.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3);
-        grad.addColorStop(0, p.color);
-        grad.addColorStop(1, 'transparent');
-        ctx!.fillStyle = grad;
-        ctx!.globalAlpha = p.alpha * 0.3;
         ctx!.fill();
 
         if (p.alpha <= 0) particles.splice(i, 1);

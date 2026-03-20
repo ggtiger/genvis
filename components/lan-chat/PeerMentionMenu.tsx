@@ -57,7 +57,7 @@ export default function PeerMentionMenu({
   return (
     <div
       ref={menuRef}
-      className="absolute z-50 w-72 max-h-64 bg-white/70 dark:bg-slate-800/80 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-xl shadow-lg overflow-hidden"
+      className="absolute z-50 w-72 max-h-64 bg-white/90 dark:bg-slate-800/95 border border-white/60 dark:border-white/10 rounded-xl shadow-lg overflow-hidden"
       style={{ bottom: position.bottom, left: position.left }}
     >
       {/* Group tabs */}

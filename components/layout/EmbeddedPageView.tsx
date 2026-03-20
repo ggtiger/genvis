@@ -17,7 +17,7 @@ export default function EmbeddedPageView({ url, title, onBack }: EmbeddedPageVie
   return (
     <div className="flex-1 flex flex-col overflow-hidden glass-card m-2 rounded-2xl h-[calc(100%-16px)]">
       {/* Header with back button */}
-      <header className="h-12 flex items-center justify-between px-4 shrink-0 backdrop-blur-md border-b border-white/10">
+      <header className="h-12 flex items-center justify-between px-4 shrink-0 border-b border-white/10">
         <div className="flex items-center gap-2">
           <button
             onClick={onBack}

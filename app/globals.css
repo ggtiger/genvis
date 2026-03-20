@@ -142,11 +142,9 @@
 }
 
 @layer components {
-  /* macOS-style glassmorphism */
+  /* macOS-style glassmorphism — backdrop-filter removed for GPU perf */
   .glass {
-    background: rgba(255, 255, 255, 0.0);
-    backdrop-filter: blur(5px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.3);
   }
   /* 亮色模式下 .glass 内的所有 slate 颜色强制为深色 */
@@ -158,23 +156,18 @@
     color: #0f172a !important;
   }
   :is(.dark .glass) {
-    background: rgba(15, 23, 42, 0.75);
+    background: rgba(15, 23, 42, 0.88);
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
   :is(.spring .glass) {
-    background: rgba(139, 0, 0, 0.65);
+    background: rgba(139, 0, 0, 0.82);
     border: 1px solid rgba(255, 215, 0, 0.2);
     position: relative;
   }
   .glass-card {
-    background: rgba(255, 255, 255, 0.2);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background: rgba(255, 255, 255, 0.25);
     border: 1px solid rgba(255, 255, 255, 0.2);
-    transition: transform 0.2s ease, background 0.2s ease;
-    /* Performance optimization for scroll */
-    transform: translateZ(0);
-    will-change: transform;
+    transition: background 0.2s ease;
   }
   /* 亮色模式下 .glass-card 内的所有 slate 颜色强制为深色 */
   :root:not(.dark):not(.spring) .glass-card :is(
@@ -185,7 +178,7 @@
     color: #0f172a !important;
   }
   :is(.dark .glass-card) {
-    background: rgba(30, 41, 59, 0.00);
+    background: rgba(30, 41, 59, 0.65);
     border: 1px solid rgba(255, 255, 255, 0.06);
   }
   :is(.spring .glass-card) {
@@ -196,7 +189,7 @@
     background: rgba(255, 255, 255, 0.3);
   }
   :is(.dark .glass-card:hover) {
-     background: rgba(30, 41, 59, 0.00);
+     background: rgba(30, 41, 59, 0.72);
   }
   :is(.spring .glass-card:hover) {
     background: rgba(153, 0, 0, 0.65);
@@ -331,10 +324,7 @@
     transform: rotate(65deg);
     top: -500px;
     left: -100px;
-    filter: blur(80px);
-    opacity: 0.5;
-    animation: float1 30s infinite ease-in-out;
-    will-change: transform;
+    opacity: 0.35;
   }
 
   .ray-2 {
@@ -344,10 +334,7 @@
     transform: rotate(-30deg);
     top: -300px;
     left: 200px;
-    filter: blur(60px);
-    opacity: 0.5;
-    animation: float2 36s infinite ease-in-out;
-    will-change: transform;
+    opacity: 0.35;
   }
 
   .ray-3 {
@@ -356,10 +343,7 @@
     background: var(--ray-gradient-accent);
     top: -320px;
     left: 500px;
-    filter: blur(65px);
-    opacity: 0.4;
-    animation: float3 40s infinite ease-in-out;
-    will-change: transform;
+    opacity: 0.3;
   }
 
   .ray-4 {
@@ -368,10 +352,7 @@
     background: var(--ray-gradient-secondary);
     top: -350px;
     left: 800px;
-    filter: blur(55px);
-    opacity: 0.45;
-    animation: float4 34s infinite ease-in-out;
-    will-change: transform;
+    opacity: 0.3;
   }
 
   /* ray-5 到 ray-8 已删除，减少 GPU 合成负载 */

@@ -291,7 +291,7 @@ export function ServiceSettings({ projectId, onOpenGlobalSettings }: ServiceSett
           {services.map(service => (
             <div
               key={service.id}
-              className="relative group overflow-hidden rounded-2xl border border-gray-200/80 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/60 transition-all duration-200 hover:shadow-lg"
+              className="relative group overflow-hidden rounded-2xl border border-gray-200/80 bg-white/80 transition-colors duration-200 hover:shadow-lg"
             >
               <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent" />
               <div className="p-5 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 justify-between">

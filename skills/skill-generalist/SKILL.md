@@ -20,7 +20,7 @@ description: "为通才技能员工提供完整的技能管理和开发指导。
 
 ### 🚫 全局铁律：先测试，后上线
 
-**无论是创建新技能还是升级现有技能，都必须在项目工作目录（cwd）内完成开发和测试。绝对禁止直接在 `$PLATFORM_ROOT_DIR/data/user-skills/` 下创建目录或写入文件。只有测试全部通过后，才能用 `cp -r` 复制到平台目录。**
+**无论是创建新技能还是升级现有技能，都必须在项目工作目录（cwd）内完成开发和测试。绝对禁止直接在 `$USER_SKILLS_DIR/` 下创建目录或写入文件。只有测试全部通过后，才能用 `cp -r` 复制到平台目录。**
 
 ## Skill 的两种类型
 
@@ -56,19 +56,19 @@ description: "为通才技能员工提供完整的技能管理和开发指导。
 
 ```bash
 # 列出所有用户技能
-ls $PLATFORM_ROOT_DIR/data/user-skills/
+ls $USER_SKILLS_DIR/
 
 # 列出所有内置技能
-ls $PLATFORM_ROOT_DIR/skills/
+ls $BUILTIN_SKILLS_DIR/
 
 # 查看某个技能的描述和功能
-cat $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/SKILL.md
+cat $USER_SKILLS_DIR/{skill-name}/SKILL.md
 
 # 查看 API Skill 的端点信息
-cat $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/api-endpoints.json
+cat $USER_SKILLS_DIR/{skill-name}/api-endpoints.json
 
 # 查看 Script Skill 的可用脚本
-ls $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/scripts/
+ls $USER_SKILLS_DIR/{skill-name}/scripts/
 ```
 
 ### 调用 API Skill
@@ -77,7 +77,7 @@ ls $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/scripts/
 2. 检查部署状态和端口号：
 
 ```bash
-cat $PLATFORM_ROOT_DIR/data/user-skills/.claude-plugin/plugin-ex.json
+cat $USER_SKILLS_DIR/.claude-plugin/plugin-ex.json
 # 查看 deployedSkills 中对应技能的 port 字段
 ```
 
@@ -100,7 +100,7 @@ curl -s http://localhost:{port}/api/{endpoint}?param=value
 直接在技能目录下执行脚本：
 
 ```bash
-cd $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}
+cd $USER_SKILLS_DIR/{skill-name}
 python3 scripts/{action}.py {参数}
 ```
 
@@ -131,11 +131,11 @@ echo "$RESULT_A" | python3 -c "import sys,json; data=json.load(sys.stdin); print
 
 ### 升级流程（必须严格按顺序执行，禁止跳步）
 
-**⚠️ 禁止直接修改 $PLATFORM_ROOT_DIR/data/user-skills/ 下的文件。必须先复制到工作目录，修改并测试通过后才复制回去。**
+**⚠️ 禁止直接修改 $USER_SKILLS_DIR/ 下的文件。必须先复制到工作目录，修改并测试通过后才复制回去。**
 
 1. 将目标技能复制到工作目录：
 ```bash
-cp -r $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/ ./{skill-name}/
+cp -r $USER_SKILLS_DIR/{skill-name}/ ./{skill-name}/
 ```
 
 2. 在工作目录中修改代码：
@@ -149,7 +149,7 @@ cp -r $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/ ./{skill-name}/
 
 5. **确认所有测试通过后**，复制回平台技能目录：
 ```bash
-cp -r {skill-name}/ $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/
+cp -r {skill-name}/ $USER_SKILLS_DIR/{skill-name}/
 ```
 
 6. 提醒用户：「技能已升级，请在技能列表中重新部署该技能。」
@@ -165,26 +165,26 @@ cp -r {skill-name}/ $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/
 ### 文件操作策略
 
 - 工作目录（cwd）是隔离的项目目录，不是技能最终存放位置
-- 平台根目录：环境变量 $PLATFORM_ROOT_DIR
-- 技能最终目录：$PLATFORM_ROOT_DIR/data/user-skills/
+- 用户技能目录：环境变量 $USER_SKILLS_DIR
+- 内置技能目录：环境变量 $BUILTIN_SKILLS_DIR
 
 ### 创建流程（必须严格按顺序执行，禁止跳步）
 
-**⚠️ 绝对禁止直接在 $PLATFORM_ROOT_DIR/data/user-skills/ 下创建或写入文件。必须先在项目工作目录内完成开发和测试，测试全部通过后才能复制到平台。**
+**⚠️ 绝对禁止直接在 $USER_SKILLS_DIR/ 下创建或写入文件。必须先在项目工作目录内完成开发和测试，测试全部通过后才能复制到平台。**
 
-1. **在项目工作目录（cwd）中创建技能子目录**：`mkdir -p {skill-name}/` — 注意是当前工作目录，不是 $PLATFORM_ROOT_DIR
+1. **在项目工作目录（cwd）中创建技能子目录**：`mkdir -p {skill-name}/` — 注意是当前工作目录，不是 $USER_SKILLS_DIR
 2. **编写所有技能文件**（SKILL.md、脚本、requirements.txt 等）
 3. **在项目工作目录内执行测试验证**（参照下方"测试验证检查清单"逐项通过）
 4. **确认所有测试通过后**，才复制到平台技能目录：
 ```bash
-cp -r {skill-name}/ $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/
+cp -r {skill-name}/ $USER_SKILLS_DIR/{skill-name}/
 ```
 5. 提醒用户：「Skill 已创建完成，请在技能列表中找到它并点击启动按钮部署。」
 
 **违规示例（禁止）：**
 ```bash
 # ❌ 错误：直接在平台目录创建
-mkdir -p $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}
+mkdir -p $USER_SKILLS_DIR/{skill-name}
 # ❌ 错误：跳过测试直接复制
 ```
 
@@ -196,7 +196,7 @@ mkdir -p {skill-name}/scripts/
 # ✅ 正确：在工作目录测试
 python3 {skill-name}/scripts/action.py test-input
 # ✅ 正确：测试通过后才复制
-cp -r {skill-name}/ $PLATFORM_ROOT_DIR/data/user-skills/{skill-name}/
+cp -r {skill-name}/ $USER_SKILLS_DIR/{skill-name}/
 ```
 
 

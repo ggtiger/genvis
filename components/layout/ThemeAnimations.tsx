@@ -114,6 +114,8 @@ type Particle = {
   landed?: boolean;
 };
 
+const FRAME_INTERVAL = 42; // ~24fps instead of 60fps
+
 function AnimationCanvas({ effect }: { effect: AnimationEffect }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -156,7 +158,7 @@ function AnimationCanvas({ effect }: { effect: AnimationEffect }) {
     // ═══════════════ SNOW with accumulation ═══════════════
     function initSnow() {
       snowGround.fill(0);
-      particles = Array.from({ length: 60 }, () => ({
+      particles = Array.from({ length: 25 }, () => ({
         x: Math.random() * w,
         y: Math.random() * h * 0.8,
         vx: 0, vy: 0.3 + Math.random() * 0.8,
@@ -253,7 +255,7 @@ function AnimationCanvas({ effect }: { effect: AnimationEffect }) {
     // ═══════════════ SAKURA (proper 5-petal flowers + loose petals) ═══════════════
     const petalColors = ['#ffb7c5', '#ff91a4', '#ffc0cb', '#f8c8dc', '#ffa6c1'];
     function initSakura() {
-      particles = Array.from({ length: 50 }, () => ({
+      particles = Array.from({ length: 20 }, () => ({
         x: Math.random() * w * 1.2 - w * 0.1,
         y: Math.random() * h - h * 0.5,
         vx: 0.2 + Math.random() * 0.5,
@@ -371,7 +373,7 @@ function AnimationCanvas({ effect }: { effect: AnimationEffect }) {
         ctx.fillStyle = `hsl(${r.hue},80%,80%)`;
         ctx.fill();
         if (r.y <= r.targetY) {
-          const count = 60 + Math.floor(Math.random() * 40);
+          const count = 25 + Math.floor(Math.random() * 15);
           for (let j = 0; j < count; j++) {
             const angle = (Math.PI * 2 * j) / count + (Math.random() - 0.5) * 0.5;
             const speed = 1 + Math.random() * 4;
@@ -382,8 +384,8 @@ function AnimationCanvas({ effect }: { effect: AnimationEffect }) {
               life: 0, maxLife: 70 + Math.random() * 50, rotation: 0, vr: 0,
             });
           }
-          for (let j = 0; j < 20; j++) {
-            const angle = (Math.PI * 2 * j) / 20;
+          for (let j = 0; j < 8; j++) {
+            const angle = (Math.PI * 2 * j) / 8;
             particles.push({
               x: r.x, y: r.y, vx: Math.cos(angle) * (0.5 + Math.random() * 1.5), vy: Math.sin(angle) * (0.5 + Math.random() * 1.5),
               size: 1 + Math.random(), opacity: 1,
@@ -401,12 +403,7 @@ function AnimationCanvas({ effect }: { effect: AnimationEffect }) {
         p.life++;
         p.opacity = Math.max(0, 1 - (p.life / p.maxLife) ** 1.5);
         if (p.life >= p.maxLife) { particles.splice(i, 1); continue; }
-        const glow = p.size * 3 * p.opacity;
-        const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glow);
-        grad.addColorStop(0, p.color.replace(')', `,${p.opacity})`).replace('hsl(', 'hsla('));
-        grad.addColorStop(1, 'transparent');
-        ctx.fillStyle = grad;
-        ctx.fillRect(p.x - glow, p.y - glow, glow * 2, glow * 2);
+        // Simple solid circle instead of per-particle radialGradient (GPU perf)
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size * p.opacity, 0, Math.PI * 2);
         ctx.fillStyle = p.color;
@@ -419,7 +416,7 @@ function AnimationCanvas({ effect }: { effect: AnimationEffect }) {
     // ═══════════════ CELEBRATE (confetti) ═══════════════
     const confettiColors = ['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#ff6bff', '#ff9f43', '#a855f7', '#f43f5e'];
     function initCelebrate() {
-      particles = Array.from({ length: 90 }, () => ({
+      particles = Array.from({ length: 35 }, () => ({
         x: Math.random() * w, y: Math.random() * h - h,
         vx: (Math.random() - 0.5) * 2, vy: 1.5 + Math.random() * 3,
         size: 5 + Math.random() * 7, opacity: 0.8 + Math.random() * 0.2,
@@ -451,7 +448,14 @@ function AnimationCanvas({ effect }: { effect: AnimationEffect }) {
     if (!init || !draw) return;
     init();
 
-    function loop(t: number) { draw(t); rafRef.current = requestAnimationFrame(loop); }
+    let lastFrame = 0;
+    function loop(t: number) {
+      if (t - lastFrame >= FRAME_INTERVAL) {
+        lastFrame = t;
+        draw(t);
+      }
+      rafRef.current = requestAnimationFrame(loop);
+    }
     rafRef.current = requestAnimationFrame(loop);
 
     return () => { cancelAnimationFrame(rafRef.current); window.removeEventListener('resize', onResize); };

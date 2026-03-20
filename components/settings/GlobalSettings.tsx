@@ -868,7 +868,7 @@ export default function GlobalSettings({ isOpen, onClose, initialTab = 'ai-agent
       {installModalOpen && selectedCLI && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" key={`modal-${selectedCLI.id}`}>
           <div 
-            className="absolute inset-0 bg-black/60 backdrop-blur-md"
+            className="absolute inset-0 bg-black/70"
             onClick={() => {
               setInstallModalOpen(false);
               setSelectedCLI(null);

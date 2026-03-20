@@ -42,7 +42,7 @@ export default function GroupCreateModal({ peers, selfInfo, onClose, onCreated }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-[420px] max-h-[80vh] overflow-hidden">
         <div className="flex items-center justify-between p-4 border-b border-border-subtle">
           <h2 className="text-base font-semibold text-text-main">创建群组</h2>
