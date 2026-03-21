@@ -31,6 +31,11 @@ export class PeerTransport {
     this.localPeerName = peerName;
   }
 
+  /** Update the display name used in messages */
+  setPeerName(name: string): void {
+    this.localPeerName = name;
+  }
+
   onMessage(handler: MessageHandler): void {
     this.messageHandler = handler;
   }

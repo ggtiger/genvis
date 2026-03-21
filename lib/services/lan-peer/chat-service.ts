@@ -83,13 +83,14 @@ export async function getGroups(): Promise<ChatGroup[]> {
   }
 }
 
-export async function updateGroup(groupId: string, partial: Partial<Pick<ChatGroup, 'name' | 'members' | 'enabledSkills' | 'systemPrompt'>>): Promise<ChatGroup | null> {
+export async function updateGroup(groupId: string, partial: Partial<Pick<ChatGroup, 'name' | 'members' | 'enabledSkills' | 'systemPrompt' | 'scheduledMessages'>>): Promise<ChatGroup | null> {
   const group = await getGroup(groupId);
   if (!group) return null;
   if (partial.name !== undefined) group.name = partial.name;
   if (partial.members !== undefined) group.members = partial.members;
   if (partial.enabledSkills !== undefined) group.enabledSkills = partial.enabledSkills;
   if (partial.systemPrompt !== undefined) group.systemPrompt = partial.systemPrompt;
+  if (partial.scheduledMessages !== undefined) group.scheduledMessages = partial.scheduledMessages;
   group.updatedAt = Date.now();
   await fs.writeFile(groupFile(groupId), JSON.stringify(group, null, 2), 'utf8');
   return group;

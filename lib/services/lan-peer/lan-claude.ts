@@ -24,7 +24,7 @@ import { CLAUDE_DEFAULT_MODEL, normalizeClaudeModelId } from '@/lib/constants/cl
 // ========== Constants ==========
 
 export const AI_SENDER_ID = 'ai-assistant';
-export const AI_SENDER_NAME = 'AI 助手';
+export const AI_SENDER_NAME = '群助理';
 
 // ========== Tool Action Inference (adapted from project chat) ==========
 
@@ -67,7 +67,7 @@ function extractPathFromInput(toolInput: Record<string, unknown>): string | unde
   return undefined;
 }
 
-const LAN_DEFAULT_SYSTEM_PROMPT = `你是一个局域网群聊中的 AI 助手。
+const LAN_DEFAULT_SYSTEM_PROMPT = `你是一个局域网群聊中的 群助理。
 你具备完整的工具能力，可以读写文件、执行命令、搜索代码等。
 请根据对话上下文自然地参与讨论，回答问题，提供帮助。
 当用户需要操作文件或执行代码时，使用你的工具来完成。

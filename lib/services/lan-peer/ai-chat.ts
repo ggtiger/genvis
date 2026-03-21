@@ -9,9 +9,9 @@
 import type { ChatMessage } from './types';
 
 const AI_SENDER_ID = 'ai-assistant';
-const AI_SENDER_NAME = 'AI 助手';
+const AI_SENDER_NAME = '群助理';
 
-const SYSTEM_PROMPT = `你是一个局域网群聊中的 AI 助手。
+const SYSTEM_PROMPT = `你是一个局域网群聊中的 群助理。
 请根据对话上下文自然地参与讨论，回答问题，提供帮助。
 保持简洁友好，用中文回复。不要使用 Markdown 格式，直接输出纯文本。`;
 

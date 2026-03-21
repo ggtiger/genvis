@@ -69,7 +69,7 @@ export default function GroupCreateModal({ peers, selfInfo, onClose, onCreated }
             <textarea
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder={`设定 AI 助手的性格、行为规则和回复风格...
+              placeholder={`设定 群助理的性格、行为规则和回复风格...
 留空则使用默认提示词 + 设置页的 SOUL`}
               rows={3}
               className="w-full px-3 py-2 rounded-lg border border-border-subtle bg-white dark:bg-slate-700 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none font-mono"

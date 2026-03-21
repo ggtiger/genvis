@@ -71,6 +71,18 @@ export async function PUT(request: NextRequest) {
     const lanPeerRaw = candidate.lan_peer;
     if (lanPeerRaw && typeof lanPeerRaw === 'object') {
       update.lan_peer = lanPeerRaw;
+
+      // Sync peer name change to running manager
+      const nodeName = (lanPeerRaw as Record<string, unknown>).nodeName;
+      if (typeof nodeName === 'string') {
+        try {
+          const { getLanPeerManager } = await import('@/lib/services/lan-peer/manager');
+          const mgr = getLanPeerManager();
+          if (mgr && mgr.peerName !== nodeName) {
+            mgr.updatePeerName(nodeName || '未命名节点');
+          }
+        } catch { /* ignore if manager not initialized */ }
+      }
     }
 
     const nextSettings = await updateGlobalSettings(update);

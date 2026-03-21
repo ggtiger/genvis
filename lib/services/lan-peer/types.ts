@@ -61,6 +61,17 @@ export interface PeerMessage {
 
 // ========== Chat Groups ==========
 
+export interface ScheduledMessage {
+  id: string;
+  content: string;           // message text to send
+  scheduleType: 'interval' | 'daily';  // interval = every N minutes, daily = at specific time each day
+  intervalMinutes: number;   // send every N minutes (used when scheduleType='interval')
+  scheduledTime?: string;    // HH:MM format, e.g. '09:30' (used when scheduleType='daily')
+  aiReply: boolean;          // whether AI should respond after this message
+  enabled: boolean;
+  lastSentAt?: number;       // epoch ms of last send
+}
+
 export interface ChatGroup {
   id: string;
   name: string;
@@ -69,6 +80,7 @@ export interface ChatGroup {
   enabledSkills: string[];  // skills open to this group
   systemPrompt?: string;    // custom system prompt for the group AI bot
   activeSessionId?: string; // Claude SDK session ID for context continuity
+  scheduledMessages?: ScheduledMessage[];  // timed auto-send messages
   createdAt: number;
   updatedAt: number;
 }

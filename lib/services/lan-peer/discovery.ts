@@ -129,6 +129,11 @@ export class DiscoveryService {
     this.wsPort = port;
   }
 
+  /** Update the display name advertised in broadcasts */
+  setPeerName(name: string): void {
+    this.localPeerName = name;
+  }
+
   async start(): Promise<void> {
     const dgram = await import('dgram');
     const { getPrimaryLanIP } = await import('@/lib/utils/network');

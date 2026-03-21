@@ -19,7 +19,7 @@ import { DEFAULT_LAN_PEER_SETTINGS } from './types';
 
 export class LanPeerManager {
   readonly peerId: string;
-  readonly peerName: string;
+  peerName: string;
   readonly discovery: DiscoveryService;
   readonly transport: PeerTransport;
 
@@ -28,6 +28,17 @@ export class LanPeerManager {
     this.peerName = peerName;
     this.discovery = discovery;
     this.transport = transport;
+  }
+
+  /** Update peer display name at runtime (after settings change) */
+  updatePeerName(name: string): void {
+    this.peerName = name;
+    this.discovery.setPeerName(name);
+    this.transport.setPeerName(name);
+    // Also update scheduler identity
+    import('./scheduled-message-service').then(({ updateSchedulerIdentity }) => {
+      updateSchedulerIdentity(this.peerId, name);
+    }).catch(() => {});
   }
 
   async start(wsPort: number): Promise<void> {
@@ -56,9 +67,15 @@ export class LanPeerManager {
     });
 
     console.log(`[LanPeer Manager] 已启动 (peerId=${this.peerId}, name=${this.peerName})`);
+
+    // Start scheduled message scheduler
+    const { startScheduler } = await import('./scheduled-message-service');
+    startScheduler(this.peerId, this.peerName, () => this.transport);
   }
 
   async stop(): Promise<void> {
+    const { stopScheduler } = await import('./scheduled-message-service');
+    stopScheduler();
     await this.discovery.stop();
     await this.transport.stopServer();
   }

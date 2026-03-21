@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Folder, FolderPlus, FilePlus, Upload, Trash2, Pencil, Copy, Move, MoreHorizontal, BookmarkPlus, RotateCcw, Plus, Minus, History, GitCompare, ChevronRight } from 'lucide-react';
+import { Folder, FolderPlus, FilePlus, Upload, Download, Trash2, Pencil, Copy, Move, MoreHorizontal, BookmarkPlus, RotateCcw, Plus, Minus, History, GitCompare, ChevronRight } from 'lucide-react';
 import type { GitFileStatus, GitStatusResult } from '@/types/shared/git';
 import {
   WordIcon, ExcelIcon, PowerPointIcon, PdfIcon,
@@ -31,6 +31,8 @@ interface FileGridViewProps {
   onRefresh?: () => void;
   /** Compact list mode for narrow panels (e.g. sidebar) */
   compact?: boolean;
+  /** Download file handler */
+  onDownload?: (file: FileItem) => void;
   // Git integration props (context menu only)
   gitInfo?: GitStatusResult;
   onGitStage?: (file: FileItem, action: 'stage' | 'restore' | 'restore-staged') => Promise<void>;
@@ -176,7 +178,7 @@ function getGitFileNameClass(status?: GitFileStatus): string {
 }
 
 // Context menu component with viewport-aware positioning
-export function ContextMenu({ x, y, file, onClose, onRename, onDelete, onCopy, onMove, containerRef, onNewFile, onNewFolder, onUpload, onAddToContext, onGitStage, onGitDiff, onGitLog }: {
+export function ContextMenu({ x, y, file, onClose, onRename, onDelete, onCopy, onMove, containerRef, onNewFile, onNewFolder, onUpload, onAddToContext, onDownload, onGitStage, onGitDiff, onGitLog }: {
   x: number; y: number; file: FileItem;
   onClose: () => void; onRename: () => void; onDelete: () => void;
   onCopy: () => void; onMove: () => void;
@@ -185,6 +187,7 @@ export function ContextMenu({ x, y, file, onClose, onRename, onDelete, onCopy, o
   onNewFolder?: () => void;
   onUpload?: () => void;
   onAddToContext?: () => void;
+  onDownload?: () => void;
   onGitStage?: (file: FileItem, action: 'stage' | 'restore' | 'restore-staged') => void;
   onGitDiff?: (file: FileItem, from?: string, to?: string) => void;
   onGitLog?: (file?: FileItem) => void;
@@ -255,6 +258,9 @@ export function ContextMenu({ x, y, file, onClose, onRename, onDelete, onCopy, o
     { icon: <Copy size={14} />, label: '复制', action: onCopy },
     { icon: <Move size={14} />, label: '移动到...', action: onMove },
   );
+  if (!isDir && onDownload) {
+    items.push({ icon: <Download size={14} className="text-blue-500" />, label: '下载', action: onDownload });
+  }
   if (isOfficePdf && onAddToContext) {
     items.push({ icon: <BookmarkPlus size={14} className="text-blue-500" />, label: '加入上下文', action: onAddToContext, separator: true });
   }
@@ -424,7 +430,7 @@ export function PromptDialog({ title, defaultValue, onConfirm, onCancel }: {
   );
 }
 
-export default function FileGridView({ files, projectId, currentDir = '.', onFileClick, onFolderClick, onRefresh, compact, gitInfo, onGitStage, onGitDiff, onGitLog }: FileGridViewProps) {
+export default function FileGridView({ files, projectId, currentDir = '.', onFileClick, onFolderClick, onRefresh, compact, onDownload, gitInfo, onGitStage, onGitDiff, onGitLog }: FileGridViewProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: FileItem } | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
@@ -783,6 +789,7 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
           onGitStage={onGitStage ? (file, action) => { onGitStage(file, action); setContextMenu(null); } : undefined}
           onGitDiff={onGitDiff ? (file, from, to) => { onGitDiff(file, from, to); setContextMenu(null); } : undefined}
           onGitLog={onGitLog ? (file) => { onGitLog(file); setContextMenu(null); } : undefined}
+          onDownload={onDownload ? () => { onDownload(contextMenu.file); setContextMenu(null); } : undefined}
           onAddToContext={projectId ? () => {
             const f = contextMenu.file;
             fetch(`/api/context-files`, {
