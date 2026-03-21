@@ -45,9 +45,9 @@ export function parseInteractionMode(
     return { mode: 'plain', cleanContent: trimmed };
   }
 
-  // `#内容` → plain (explicit)
+  // `#内容` → no_ai (explicit plain chat, skip AI response)
   if (trimmed.startsWith('#')) {
-    return { mode: 'plain', cleanContent: trimmed.slice(1).trim() };
+    return { mode: 'no_ai', cleanContent: trimmed.slice(1).trim() };
   }
 
   // Default: skill_invoke if group has skills, otherwise plain

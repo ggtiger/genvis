@@ -26,6 +26,22 @@ class LanPeerStreamManager {
     abortController: AbortController;
   }>();
 
+  /**
+   * Per-group broadcast callbacks.
+   * When set, matching ai_stream_* events are forwarded to peers via WebSocket.
+   */
+  private broadcastCallbacks = new Map<string, (event: LanPeerEvent) => void>();
+
+  /** Register a callback that will be invoked for ai_stream_* events of a specific group */
+  setBroadcastCallback(groupId: string, fn: (event: LanPeerEvent) => void): void {
+    this.broadcastCallbacks.set(groupId, fn);
+  }
+
+  /** Remove broadcast callback for a group */
+  clearBroadcastCallback(groupId: string): void {
+    this.broadcastCallbacks.delete(groupId);
+  }
+
   addConnection(controller: ReadableStreamDefaultController): string {
     const id = randomUUID();
     this.connections.add(controller);
@@ -37,14 +53,27 @@ class LanPeerStreamManager {
   }
 
   publish(event: LanPeerEvent): void {
-    if (this.connections.size === 0) return;
-    const message = `data: ${JSON.stringify(event)}\n\n`;
-    const encoded = new TextEncoder().encode(message);
-    const dead: ReadableStreamDefaultController[] = [];
-    for (const controller of this.connections) {
-      try { controller.enqueue(encoded); } catch { dead.push(controller); }
+    // Push to local SSE clients
+    if (this.connections.size > 0) {
+      const message = `data: ${JSON.stringify(event)}\n\n`;
+      const encoded = new TextEncoder().encode(message);
+      const dead: ReadableStreamDefaultController[] = [];
+      for (const controller of this.connections) {
+        try { controller.enqueue(encoded); } catch { dead.push(controller); }
+      }
+      for (const c of dead) this.removeConnection(c);
     }
-    for (const c of dead) this.removeConnection(c);
+
+    // Forward ai_stream_* events to peers via registered broadcast callback
+    const groupId = (event.data as any)?.groupId;
+    if (groupId && event.type.startsWith('ai_stream_')) {
+      const cb = this.broadcastCallbacks.get(groupId);
+      if (cb) {
+        try { cb(event); } catch (err) {
+          console.error('[LanPeerStream] Broadcast callback error:', err);
+        }
+      }
+    }
   }
 
   /** Mark a group as actively streaming AI content. Returns an AbortController for cancellation. */

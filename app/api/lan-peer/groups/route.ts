@@ -9,7 +9,13 @@ import { getLanPeerManager } from '@/lib/services/lan-peer/manager';
 
 export async function GET() {
   try {
-    const groups = await getGroups();
+    const allGroups = await getGroups();
+    // Only return groups where the local peer is a member
+    const manager = getLanPeerManager();
+    const localPeerId = manager?.peerId || 'local';
+    const groups = allGroups.filter(g =>
+      g.members.includes(localPeerId) || g.creatorId === localPeerId || g.creatorId === 'local'
+    );
     return NextResponse.json({ success: true, data: groups });
   } catch (error) {
     return NextResponse.json({ success: false, error: '获取群组列表失败' }, { status: 500 });

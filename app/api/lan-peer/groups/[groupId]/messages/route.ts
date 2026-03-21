@@ -113,8 +113,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const localPeerId = manager?.peerId || 'local';
     const isCreator = group?.creatorId === localPeerId || group?.creatorId === 'local';
 
-    if (message.messageType === 'text' && interaction.mode !== 'skill_invoke' && isCreator) {
-      handleAIReply(groupId, message, manager, group).catch((err) => {
+    if (message.messageType === 'text' && interaction.mode !== 'skill_invoke' && interaction.mode !== 'no_ai' && isCreator) {
+      handleAIReply(groupId, message, interaction.cleanContent, manager, group).catch((err) => {
         console.error('[LanPeer] AI reply failed:', err);
       });
     }
@@ -186,6 +186,7 @@ async function handleSkillInvoke(
 async function handleAIReply(
   groupId: string,
   userMessage: ChatMessage,
+  cleanContent: string,
   manager: any,
   group: any,
 ): Promise<void> {
@@ -194,10 +195,25 @@ async function handleAIReply(
   const aiRequestId = randomUUID();
   const senderId = userMessage.senderId;
 
+  // Register broadcast callback: forward ai_stream_* events to all peers via WebSocket
+  const members = group?.members || [];
+  lanPeerStream.setBroadcastCallback(groupId, (event) => {
+    if (manager) {
+      manager.transport.broadcast({
+        type: 'AI_STREAM_EVENT',
+        senderId: manager.peerId,
+        senderName: manager.peerName,
+        timestamp: Date.now(),
+        payload: { streamEvent: event },
+      }, members);
+    }
+  });
+
   // Mark group as actively streaming (returns AbortController for cancellation)
   const abortController = lanPeerStream.markStreamActive(groupId, aiRequestId, senderId);
 
   // Notify frontend that AI streaming is starting (include senderId so frontend knows who triggered it)
+  // (broadcastCallback will forward this to peers)
   lanPeerStream.publish({
     type: 'ai_stream_start',
     data: { groupId, requestId: aiRequestId, senderId, timestamp: new Date().toISOString() },
@@ -207,7 +223,7 @@ async function handleAIReply(
     // executeLanClaude handles streaming, DB persistence, and session update internally
     await executeLanClaude({
       groupId,
-      instruction: userMessage.content,
+      instruction: cleanContent || userMessage.content,
       sessionId: group?.activeSessionId,
       requestId: aiRequestId,
       senderName: userMessage.senderName,
@@ -217,12 +233,14 @@ async function handleAIReply(
     // Clear active stream marker
     lanPeerStream.markStreamDone(groupId);
 
-    // Safety net: always send ai_stream_end to clear the frontend spinner,
-    // even if executeLanClaude already sent one (frontend deduplicates via setStreamingMessage(null)).
+    // Safety net: always send ai_stream_end (also broadcast to peers via callback)
     lanPeerStream.publish({
       type: 'ai_stream_end',
       data: { groupId, requestId: aiRequestId, timestamp: new Date().toISOString() },
     });
+
+    // Clean up broadcast callback
+    lanPeerStream.clearBroadcastCallback(groupId);
   }
 
   // After SDK completes, broadcast the final AI message to peers

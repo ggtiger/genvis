@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowUp, Users, Trash2, Save, Settings, Zap, FolderOpen, X, Square } from 'lucide-react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { ArrowUp, Users, Trash2, Save, Settings, Zap, FolderOpen, X, Square, UserPlus, UserMinus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ChatMessageBubble from './ChatMessageBubble';
@@ -28,10 +28,11 @@ const getFilePreviewType = (filePath: string): FilePreviewType => {
 interface GroupChatPanelProps {
   group: ChatGroup;
   peers: PeerInfo[];
+  selfInfo?: PeerInfo | null;
   onDeleteGroup?: (groupId: string) => void;
 }
 
-export default function GroupChatPanel({ group, peers, onDeleteGroup }: GroupChatPanelProps) {
+export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }: GroupChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [inputValue, setInputValue] = useState('');
@@ -43,7 +44,13 @@ export default function GroupChatPanel({ group, peers, onDeleteGroup }: GroupCha
   const [showFiles, setShowFiles] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(group.systemPrompt || '');
   const [savingPrompt, setSavingPrompt] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [groupMembers, setGroupMembers] = useState<string[]>(group.members);
+  const [savingMembers, setSavingMembers] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // ========== File browser state (reuses project FileGridView) ==========
@@ -122,12 +129,15 @@ export default function GroupChatPanel({ group, peers, onDeleteGroup }: GroupCha
     setOfficePreviewFile(null);
   };
 
+  const PAGE_SIZE = 50;
+
   const loadMessages = useCallback(async (replace = false) => {
     try {
-      const res = await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}/messages?limit=100`);
+      const res = await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}/messages?limit=${PAGE_SIZE}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.data)) {
         const dbMsgs: ChatMessage[] = data.data;
+        setHasMore(dbMsgs.length >= PAGE_SIZE);
         setMessages((prev) => {
           // Safety: never wipe existing messages with empty result
           if (dbMsgs.length === 0 && prev.length > 0) return prev;
@@ -146,6 +156,48 @@ export default function GroupChatPanel({ group, peers, onDeleteGroup }: GroupCha
       }
     } catch { /* ignore */ }
   }, [group.id]);
+
+  // Track pending scroll restore after prepending older messages
+  const scrollRestoreRef = useRef<{ prevScrollHeight: number } | null>(null);
+  const skipAutoScrollRef = useRef(false);
+
+  // useLayoutEffect runs synchronously after DOM mutation, before paint
+  // This ensures scroll position is corrected before the user sees any jump
+  useLayoutEffect(() => {
+    if (scrollRestoreRef.current && messagesContainerRef.current) {
+      const container = messagesContainerRef.current;
+      const { prevScrollHeight } = scrollRestoreRef.current;
+      container.scrollTop = container.scrollHeight - prevScrollHeight;
+      scrollRestoreRef.current = null;
+      skipAutoScrollRef.current = true;
+    }
+  }, [messages]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const oldestMsg = messages[0];
+      if (!oldestMsg) { setLoadingMore(false); return; }
+      const res = await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}/messages?limit=${PAGE_SIZE}&beforeId=${oldestMsg.id}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        const olderMsgs: ChatMessage[] = data.data;
+        setHasMore(olderMsgs.length >= PAGE_SIZE);
+        if (olderMsgs.length > 0) {
+          // Record current scrollHeight so useLayoutEffect can restore position
+          const container = messagesContainerRef.current;
+          scrollRestoreRef.current = { prevScrollHeight: container?.scrollHeight || 0 };
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map(m => m.id));
+            const newMsgs = olderMsgs.filter(m => !existingIds.has(m.id));
+            return [...newMsgs, ...prev];
+          });
+        }
+      }
+    } catch { /* ignore */ }
+    setLoadingMore(false);
+  }, [group.id, messages, loadingMore, hasMore]);
 
   useEffect(() => {
     loadMessages(true); // Full replace on initial load
@@ -322,9 +374,29 @@ export default function GroupChatPanel({ group, peers, onDeleteGroup }: GroupCha
     return () => es.close();
   }, [group.id, loadTree]);
 
+  // Track the last message id to detect truly new messages (not just reloads/prepends)
+  const lastMsgIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, streamingMessage?.content]);
+    // Skip auto-scroll to bottom when we just prepended older messages
+    if (skipAutoScrollRef.current) {
+      skipAutoScrollRef.current = false;
+      return;
+    }
+    // Only auto-scroll when the LAST message changes (new message arrived)
+    const currentLastId = messages.length > 0 ? messages[messages.length - 1].id : null;
+    if (currentLastId !== lastMsgIdRef.current) {
+      lastMsgIdRef.current = currentLastId;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    }
+  }, [messages]);
+
+  // Also scroll to bottom on streaming content updates
+  useEffect(() => {
+    if (streamingMessage?.content) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    }
+  }, [streamingMessage?.content]);
 
   const isMyStream = streamingMessage && streamingSenderId === localPeerId;
 
@@ -374,6 +446,52 @@ export default function GroupChatPanel({ group, peers, onDeleteGroup }: GroupCha
   };
 
   const memberPeers = peers.filter((p) => group.members.includes(p.id));
+  // Build a map for quick lookup: peerId -> PeerInfo (include self since peers list only has remote nodes)
+  const peerMap = new Map(peers.map(p => [p.id, p]));
+  if (selfInfo) peerMap.set(selfInfo.id, { ...selfInfo, status: 'online' as const });
+
+  // Add member to group
+  const handleAddMember = async (peerId: string) => {
+    if (groupMembers.includes(peerId) || savingMembers) return;
+    setSavingMembers(true);
+    const newMembers = [...groupMembers, peerId];
+    try {
+      const res = await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ members: newMembers }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGroupMembers(newMembers);
+        group.members = newMembers; // sync prop
+      }
+    } catch { /* ignore */ }
+    setSavingMembers(false);
+  };
+
+  // Remove member from group
+  const handleRemoveMember = async (peerId: string) => {
+    if (peerId === group.creatorId || savingMembers) return; // can't remove creator
+    setSavingMembers(true);
+    const newMembers = groupMembers.filter(id => id !== peerId);
+    try {
+      const res = await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ members: newMembers }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGroupMembers(newMembers);
+        group.members = newMembers; // sync prop
+      }
+    } catch { /* ignore */ }
+    setSavingMembers(false);
+  };
+
+  // Available peers to add (online, not already in group)
+  const availablePeers = peers.filter(p => p.status === 'online' && !groupMembers.includes(p.id));
 
   return (
     <div className="flex-1 flex flex-col h-full relative">
@@ -420,7 +538,18 @@ export default function GroupChatPanel({ group, peers, onDeleteGroup }: GroupCha
       <div className="flex flex-1 overflow-hidden">
         {/* Messages */}
         <div className="flex-1 flex flex-col">
-          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+            {hasMore && (
+              <div className="flex justify-center py-2">
+                <button
+                  onClick={loadOlderMessages}
+                  disabled={loadingMore}
+                  className="text-[11px] text-text-secondary/50 hover:text-primary/70 disabled:opacity-40 transition-colors px-3 py-1.5 rounded-lg hover:bg-white/20 dark:hover:bg-white/[0.04]"
+                >
+                  {loadingMore ? '加载中...' : '↑ 查看更早消息'}
+                </button>
+              </div>
+            )}
             {messages.map((msg) => (
               <ChatMessageBubble key={msg.id} message={msg} />
             ))}
@@ -469,113 +598,201 @@ export default function GroupChatPanel({ group, peers, onDeleteGroup }: GroupCha
             )}
           </div>
         </div>
+      </div>
 
-        {/* File browser panel — reuses project FileGridView */}
-        {showFiles && (
-          <div className="w-80 border-l border-white/10 dark:border-white/[0.04] bg-white/15 dark:bg-white/[0.01] backdrop-blur-sm flex flex-col overflow-hidden">
-            <FileGridView
-              files={tree.map(entry => ({
-                name: entry.path.split('/').pop() || entry.path,
-                path: entry.path,
-                type: entry.type === 'dir' ? 'directory' as const : 'file' as const,
-                size: entry.size,
-                extension: entry.path.split('.').pop(),
-              }))}
-              projectId={group.id}
-              currentDir={currentPath}
-              compact
-              onFileClick={handleFileClick}
-              onFolderClick={(folder) => loadTree(folder.path)}
-              onRefresh={() => loadTreeRef.current?.('.')}
-            />
-          </div>
-        )}
-
-        {/* Detail panel */}
-        {showDetail && (
-          <div className="w-60 border-l border-white/10 dark:border-white/[0.04] bg-white/15 dark:bg-white/[0.01] backdrop-blur-sm p-4 overflow-y-auto">
-            {/* Members section */}
-            <div className="mb-5">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary/60 mb-2.5 px-1">群组成员</h3>
-              <div className="space-y-0.5">
-                {memberPeers.map((peer) => (
-                  <div key={peer.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-white/20 dark:hover:bg-white/[0.04] transition-colors">
-                    <div className={`w-2 h-2 rounded-full shrink-0 ${peer.status === 'online' ? 'bg-green-500' : 'bg-gray-400/50'}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[13px] text-text-main truncate">{peer.name}</div>
-                      {peer.skills.length > 0 && (
-                        <div className="text-[10px] text-text-secondary/50">{peer.skills.length} 个技能</div>
-                      )}
-                    </div>
-                  </div>
-                ))}
+      {/* ====== File browser overlay ====== */}
+      {showFiles && (
+        <div className="absolute inset-0 z-40 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setShowFiles(false)}>
+          <div className="bg-white/70 dark:bg-white/[0.06] backdrop-blur-xl rounded-2xl shadow-2xl border border-white/30 dark:border-white/[0.08] w-full max-w-2xl h-[70vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-white/20 dark:border-white/[0.06] bg-white/30 dark:bg-white/[0.03] shrink-0">
+              <div className="flex items-center gap-2">
+                <FolderOpen className="w-4 h-4 text-primary" />
+                <span className="text-[14px] font-semibold text-text-main">群组文件</span>
               </div>
-            </div>
-
-            {/* Skills section */}
-            {group.enabledSkills.length > 0 && (
-              <div className="mb-5">
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary/60 mb-2.5 px-1">开放技能</h3>
-                <div className="space-y-1">
-                  {group.enabledSkills.map((skill) => (
-                    <div key={skill} className="flex items-center gap-2 text-[12px] px-2.5 py-1.5 bg-primary/5 hover:bg-primary/8 rounded-lg text-primary/80 transition-colors">
-                      <Zap className="w-3 h-3 shrink-0" />
-                      <span className="truncate">{skill}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* AI System Prompt Editor */}
-            <div className="mb-5 pt-4 border-t border-white/10 dark:border-white/[0.04]">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary/60 mb-1.5 px-1">AI 提示词</h3>
-              <p className="text-[10px] text-text-secondary/40 mb-2 px-1">自定义机器人人设，留空使用默认</p>
-              <textarea
-                value={editingPrompt}
-                onChange={(e) => setEditingPrompt(e.target.value)}
-                placeholder="设定 AI 的性格、行为规则..."
-                rows={5}
-                className="w-full px-2.5 py-2 text-[11px] font-mono rounded-xl border border-white/20 dark:border-white/[0.06] bg-white/30 dark:bg-white/[0.03] text-text-main focus:outline-none focus:ring-1 focus:ring-primary/20 resize-none placeholder:text-text-secondary/30"
-              />
-              <button
-                onClick={async () => {
-                  setSavingPrompt(true);
-                  try {
-                    await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ systemPrompt: editingPrompt.trim() || undefined }),
-                    });
-                  } catch { /* ignore */ }
-                  setSavingPrompt(false);
-                }}
-                disabled={savingPrompt}
-                className="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-primary/70 hover:text-primary hover:bg-primary/5 rounded-xl transition-all disabled:opacity-40"
-              >
-                <Save className="w-3.5 h-3.5" />
-                {savingPrompt ? '保存中...' : '保存提示词'}
+              <button onClick={() => setShowFiles(false)} className="p-2 rounded-xl hover:bg-white/30 dark:hover:bg-white/[0.06] text-text-secondary/60 hover:text-text-main transition-colors">
+                <X className="w-4 h-4" />
               </button>
             </div>
-            {/* Dissolve group button */}
-            {onDeleteGroup && (
+            <div className="flex-1 overflow-hidden">
+              <FileGridView
+                files={tree.map(entry => ({
+                  name: entry.path.split('/').pop() || entry.path,
+                  path: entry.path,
+                  type: entry.type === 'dir' ? 'directory' as const : 'file' as const,
+                  size: entry.size,
+                  extension: entry.path.split('.').pop(),
+                }))}
+                projectId={group.id}
+                currentDir={currentPath}
+                compact
+                onFileClick={handleFileClick}
+                onFolderClick={(folder) => loadTree(folder.path)}
+                onRefresh={() => loadTreeRef.current?.('.')}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ====== Settings overlay ====== */}
+      {showDetail && (
+        <div className="absolute inset-0 z-40 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setShowDetail(false)}>
+          <div className="bg-white/70 dark:bg-white/[0.06] backdrop-blur-xl rounded-2xl shadow-2xl border border-white/30 dark:border-white/[0.08] w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-white/20 dark:border-white/[0.06] bg-white/30 dark:bg-white/[0.03] shrink-0">
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-primary" />
+                <span className="text-[14px] font-semibold text-text-main">群组设置</span>
+              </div>
+              <button onClick={() => setShowDetail(false)} className="p-2 rounded-xl hover:bg-white/30 dark:hover:bg-white/[0.06] text-text-secondary/60 hover:text-text-main transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              {/* Members section */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-[13px] font-semibold text-text-main">群组成员 ({groupMembers.length})</h3>
+                  <button
+                    onClick={() => setShowAddMember(!showAddMember)}
+                    className={`p-1.5 rounded-lg transition-colors ${showAddMember ? 'bg-primary/10 text-primary' : 'text-text-secondary/50 hover:text-primary/70 hover:bg-white/30 dark:hover:bg-white/[0.06]'}`}
+                    title="添加成员"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Add member dropdown */}
+                {showAddMember && (
+                  <div className="mb-3 p-3 rounded-xl bg-white/30 dark:bg-white/[0.04] border border-white/20 dark:border-white/[0.06]">
+                    <p className="text-[11px] text-text-secondary/60 mb-2">选择在线节点添加</p>
+                    {availablePeers.length > 0 ? (
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {availablePeers.map((peer) => (
+                          <button
+                            key={peer.id}
+                            onClick={() => handleAddMember(peer.id)}
+                            disabled={savingMembers}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left hover:bg-primary/5 transition-colors disabled:opacity-40"
+                          >
+                            <div className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                            <span className="text-[13px] text-text-main truncate flex-1">{peer.name}</span>
+                            <span className="text-[11px] text-primary/60 font-medium">+添加</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-text-secondary/40 text-center py-3">没有可添加的在线节点</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Member list */}
+                <div className="space-y-1">
+                  {groupMembers.map((memberId) => {
+                    const peer = peerMap.get(memberId);
+                    const isCreator = memberId === group.creatorId;
+                    const isSelf = memberId === localPeerId || memberId === selfInfo?.id;
+                    const isOnline = peer?.status === 'online';
+                    const displayName = peer?.name || (isSelf ? (selfInfo?.name || '我') : memberId.slice(0, 8) + '...');
+
+                    return (
+                      <div key={memberId} className="group flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-white/20 dark:hover:bg-white/[0.04] transition-colors">
+                        <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isOnline ? 'bg-green-500' : 'bg-gray-400/50'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] text-text-main truncate flex items-center gap-1.5">
+                            {displayName}
+                            {isCreator && <span className="text-[10px] text-primary/70 bg-primary/10 px-1.5 py-0.5 rounded-md font-medium">群主</span>}
+                            {isSelf && !isCreator && <span className="text-[10px] text-blue-500/70">(我)</span>}
+                          </div>
+                          {peer && peer.skills.length > 0 && (
+                            <div className="text-[11px] text-text-secondary/50 mt-0.5">{peer.skills.length} 个技能</div>
+                          )}
+                          {!peer && !isSelf && (
+                            <div className="text-[11px] text-text-secondary/40 mt-0.5">离线</div>
+                          )}
+                        </div>
+                        {!isCreator && (
+                          <button
+                            onClick={() => handleRemoveMember(memberId)}
+                            disabled={savingMembers}
+                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-text-secondary/40 hover:text-red-400 hover:bg-red-500/5 transition-all disabled:opacity-30"
+                            title="移除成员"
+                          >
+                            <UserMinus className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Skills section */}
+              {group.enabledSkills.length > 0 && (
+                <div>
+                  <h3 className="text-[13px] font-semibold text-text-main mb-2">开放技能</h3>
+                  <div className="space-y-1">
+                    {group.enabledSkills.map((skill) => (
+                      <div key={skill} className="flex items-center gap-2 text-[13px] px-3 py-2 bg-primary/5 hover:bg-primary/8 rounded-xl text-primary/80 transition-colors">
+                        <Zap className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{skill}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* AI System Prompt Editor */}
               <div className="pt-4 border-t border-white/10 dark:border-white/[0.04]">
+                <h3 className="text-[13px] font-semibold text-text-main mb-1">群组 AI 提示词</h3>
+                <p className="text-[11px] text-text-secondary/50 mb-2.5">自定义机器人人设，留空使用默认</p>
+                <textarea
+                  value={editingPrompt}
+                  onChange={(e) => setEditingPrompt(e.target.value)}
+                  placeholder="设定 AI 的性格、行为规则..."
+                  rows={5}
+                  className="w-full px-3 py-2.5 text-[13px] font-mono rounded-xl border border-white/20 dark:border-white/[0.06] bg-white/30 dark:bg-white/[0.03] text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none placeholder:text-text-secondary/30"
+                />
                 <button
-                  onClick={() => {
-                    if (confirm(`确定要解散群组「${group.name}」吗？\n所有聊天记录将被永久删除，此操作不可撤销。`)) {
-                      onDeleteGroup(group.id);
-                    }
+                  onClick={async () => {
+                    setSavingPrompt(true);
+                    try {
+                      await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ systemPrompt: editingPrompt.trim() || undefined }),
+                      });
+                    } catch { /* ignore */ }
+                    setSavingPrompt(false);
                   }}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 text-[12px] text-red-400/70 hover:text-red-500 hover:bg-red-500/5 rounded-xl transition-all"
+                  disabled={savingPrompt}
+                  className="mt-2.5 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] font-medium text-primary hover:bg-primary/5 rounded-xl transition-all disabled:opacity-40 border border-primary/20"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  解散群组
+                  <Save className="w-4 h-4" />
+                  {savingPrompt ? '保存中...' : '保存提示词'}
                 </button>
               </div>
-            )}
+
+              {/* Dissolve group button */}
+              {onDeleteGroup && (
+                <div className="pt-4 border-t border-white/10 dark:border-white/[0.04]">
+                  <button
+                    onClick={() => {
+                      if (confirm(`确定要解散群组「${group.name}」吗？\n所有聊天记录将被永久删除，此操作不可撤销。`)) {
+                        onDeleteGroup(group.id);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 text-[13px] text-red-400/80 hover:text-red-500 hover:bg-red-500/5 rounded-xl transition-all border border-white/10 dark:border-white/[0.04]"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    解散群组
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ====== Office/PDF Preview Dialog ====== */}
       {officePreviewFile && (

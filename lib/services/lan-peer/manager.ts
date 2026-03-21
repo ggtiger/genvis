@@ -6,11 +6,14 @@
  */
 
 import { randomUUID } from 'crypto';
+import fs from 'fs/promises';
+import path from 'path';
 import { DiscoveryService } from './discovery';
 import { PeerTransport } from './transport';
-import { lanPeerStream } from './lan-peer-stream';
+import { lanPeerStream, type LanPeerEvent } from './lan-peer-stream';
 import { getGroup } from './chat-service';
 import { createLanMessage, getLanMessagesByGroup } from './lan-message-service';
+import { parseInteractionMode } from './message-parser';
 import type { PeerMessage, ChatMessage, LanPeerSettings } from './types';
 import { DEFAULT_LAN_PEER_SETTINGS } from './types';
 
@@ -71,10 +74,28 @@ export class LanPeerManager {
     const senderId = userMessage.senderId;
     const group = await getGroup(groupId);
 
+    // Parse content to extract cleanContent (strip @name prefix)
+    const enabledSkills = group?.enabledSkills || [];
+    const interaction = parseInteractionMode(userMessage.content, enabledSkills);
+    const instruction = interaction.cleanContent || userMessage.content;
+
+    // Register broadcast callback: forward ai_stream_* events to all peers via WebSocket
+    const members = group?.members || [];
+    lanPeerStream.setBroadcastCallback(groupId, (event) => {
+      this.transport.broadcast({
+        type: 'AI_STREAM_EVENT',
+        senderId: this.peerId,
+        senderName: this.peerName,
+        timestamp: Date.now(),
+        payload: { streamEvent: event },
+      }, members);
+    });
+
     // Mark stream active with senderId + AbortController
     const abortController = lanPeerStream.markStreamActive(groupId, aiRequestId, senderId);
 
     // Notify local SSE that AI streaming is starting (include senderId)
+    // (broadcastCallback will forward this to peers)
     lanPeerStream.publish({
       type: 'ai_stream_start',
       data: { groupId, requestId: aiRequestId, senderId, timestamp: new Date().toISOString() },
@@ -84,7 +105,7 @@ export class LanPeerManager {
       // Execute Claude SDK (handles streaming + DB persistence internally)
       await executeLanClaude({
         groupId,
-        instruction: userMessage.content,
+        instruction,
         sessionId: group?.activeSessionId,
         requestId: aiRequestId,
         senderName: userMessage.senderName,
@@ -94,11 +115,14 @@ export class LanPeerManager {
       // Clear active stream marker
       lanPeerStream.markStreamDone(groupId);
 
-      // Safety net: always send ai_stream_end
+      // Safety net: always send ai_stream_end (also broadcast to peers via callback)
       lanPeerStream.publish({
         type: 'ai_stream_end',
         data: { groupId, requestId: aiRequestId, timestamp: new Date().toISOString() },
       });
+
+      // Clean up broadcast callback after end event is sent
+      lanPeerStream.clearBroadcastCallback(groupId);
     }
 
     // After SDK completes, broadcast final AI message to peers
@@ -152,7 +176,8 @@ export class LanPeerManager {
           // If this node is the group creator and the message is a user text message,
           // trigger AI reply on behalf of the remote sender.
           if (chatMsg.senderId !== 'ai-assistant' && chatMsg.messageType === 'text'
-              && chatMsg.interactionMode !== 'skill_invoke') {
+              && chatMsg.interactionMode !== 'skill_invoke'
+              && chatMsg.interactionMode !== 'no_ai') {
             const group = await getGroup(chatMsg.groupId);
             if (group?.creatorId === this.peerId) {
               this.triggerAIReply(chatMsg.groupId, chatMsg).catch((err) => {
@@ -174,6 +199,29 @@ export class LanPeerManager {
         }
         break;
       }
+      case 'GROUP_UPDATE': {
+        const updatedGroup = msg.payload.group as any;
+        if (updatedGroup) {
+          const isMember = Array.isArray(updatedGroup.members) && updatedGroup.members.includes(this.peerId);
+          if (isMember) {
+            // Still a member: update local group data
+            const { updateGroup } = await import('./chat-service');
+            await updateGroup(updatedGroup.id, {
+              name: updatedGroup.name,
+              members: updatedGroup.members,
+              enabledSkills: updatedGroup.enabledSkills,
+              systemPrompt: updatedGroup.systemPrompt,
+            });
+            lanPeerStream.publish({ type: 'group_updated', data: { group: updatedGroup } });
+          } else {
+            // Removed from group: delete local copy
+            const { deleteGroup } = await import('./chat-service');
+            await deleteGroup(updatedGroup.id);
+            lanPeerStream.publish({ type: 'group_deleted', data: { groupId: updatedGroup.id } });
+          }
+        }
+        break;
+      }
       case 'SKILL_REQUEST': {
         const { skillName, method, path: apiPath, body, queryParams, requestId } = msg.payload as any;
         const { handleSkillRequest } = await import('./peer-skill-service');
@@ -191,10 +239,99 @@ export class LanPeerManager {
         // Handled by pending skill call promises (future enhancement)
         break;
       }
+      case 'AI_STREAM_EVENT': {
+        // Received a streaming event from the creator node — forward to local SSE clients
+        const streamEvent = msg.payload.streamEvent as LanPeerEvent | undefined;
+        if (streamEvent && streamEvent.type && streamEvent.data) {
+          lanPeerStream.publish(streamEvent);
+        }
+        break;
+      }
       default:
         break;
     }
   }
+}
+
+// ========== Stable Peer ID (persisted to disk) ==========
+
+const PEER_ID_FILE = path.join(process.cwd(), 'data', 'lan-peer', 'peer-id.txt');
+
+/**
+ * Get or create a stable peerId that survives server restarts.
+ * Cached in globalThis for HMR, persisted to data/lan-peer/peer-id.txt for restarts.
+ * On first run, adopts an existing group's creatorId for backward compatibility,
+ * and migrates all local groups to use the same peerId.
+ */
+export async function getStablePeerId(): Promise<string> {
+  const g = globalThis as any;
+  if (g.__lan_peer_id__) return g.__lan_peer_id__;
+
+  // Try to read from disk
+  try {
+    const saved = (await fs.readFile(PEER_ID_FILE, 'utf8')).trim();
+    if (saved) {
+      g.__lan_peer_id__ = saved;
+      return saved;
+    }
+  } catch {
+    // File doesn't exist yet — first run
+  }
+
+  // First run: scan existing groups to adopt a creatorId for backward compatibility
+  const groupsDir = path.join(process.cwd(), 'data', 'lan-peer', 'groups');
+  let adoptedId: string | null = null;
+  const oldCreatorIds = new Set<string>();
+
+  try {
+    const entries = await fs.readdir(groupsDir);
+    for (const entry of entries) {
+      try {
+        const gFile = path.join(groupsDir, entry, 'group.json');
+        const raw = await fs.readFile(gFile, 'utf8');
+        const group = JSON.parse(raw);
+        if (group.creatorId && group.creatorId !== 'local') {
+          oldCreatorIds.add(group.creatorId);
+          if (!adoptedId) adoptedId = group.creatorId;
+        }
+      } catch { /* skip invalid groups */ }
+    }
+  } catch { /* no groups dir yet */ }
+
+  const newId = adoptedId || randomUUID();
+  g.__lan_peer_id__ = newId;
+
+  // Persist to disk
+  try {
+    await fs.mkdir(path.dirname(PEER_ID_FILE), { recursive: true });
+    await fs.writeFile(PEER_ID_FILE, newId, 'utf8');
+  } catch (err) {
+    console.error('[LanPeer] Failed to persist peerId:', err);
+  }
+
+  // Migrate: update all local groups with mismatched creatorId
+  if (oldCreatorIds.size > 0) {
+    for (const oldId of oldCreatorIds) {
+      if (oldId === newId) continue;
+      try {
+        const entries = await fs.readdir(groupsDir);
+        for (const entry of entries) {
+          try {
+            const gFile = path.join(groupsDir, entry, 'group.json');
+            const raw = await fs.readFile(gFile, 'utf8');
+            const group = JSON.parse(raw);
+            if (group.creatorId === oldId) {
+              group.creatorId = newId;
+              await fs.writeFile(gFile, JSON.stringify(group, null, 2), 'utf8');
+              console.log(`[LanPeer] Migrated group ${entry} creatorId: ${oldId} → ${newId}`);
+            }
+          } catch { /* skip */ }
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  return newId;
 }
 
 // ========== Singleton ==========
@@ -220,7 +357,7 @@ export async function initLanPeerManager(): Promise<LanPeerManager | null> {
     return null;
   }
 
-  const peerId = g.__lan_peer_id__ ?? (g.__lan_peer_id__ = randomUUID());
+  const peerId = await getStablePeerId();
   const peerName = lanPeer.nodeName || '未命名节点';
   const httpPort = parseInt(process.env.PORT || '3000', 10);
 

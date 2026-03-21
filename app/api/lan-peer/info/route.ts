@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server';
 import { loadGlobalSettings } from '@/lib/services/settings';
 import { getPrimaryLanIP } from '@/lib/utils/network';
 import { DEFAULT_LAN_PEER_SETTINGS } from '@/lib/services/lan-peer/types';
+import { getStablePeerId } from '@/lib/services/lan-peer/manager';
 
 export async function GET() {
   try {
@@ -16,7 +17,7 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       data: {
-        id: getLanPeerId(),
+        id: await getStablePeerId(),
         name: lanPeer.nodeName || '未命名节点',
         ip,
         port: lanPeer.wsPort,
@@ -29,14 +30,4 @@ export async function GET() {
   } catch (error) {
     return NextResponse.json({ success: false, error: '获取节点信息失败' }, { status: 500 });
   }
-}
-
-/** Stable peer ID derived from machine — stored in globalThis for HMR stability */
-function getLanPeerId(): string {
-  const g = globalThis as any;
-  if (!g.__lan_peer_id__) {
-    const { randomUUID } = require('crypto');
-    g.__lan_peer_id__ = randomUUID();
-  }
-  return g.__lan_peer_id__;
 }

@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChevronDown, ChevronRight, FileText, FilePlus, FileEdit, Trash2, Search, Terminal, Sparkles, AlertCircle, Copy, Check } from 'lucide-react';
-import type { ChatMessage } from '@/lib/services/lan-peer/types';
+import type { ChatMessage, InteractionMode } from '@/lib/services/lan-peer/types';
 
 // ========== Action display config ==========
 
@@ -128,6 +128,45 @@ function MarkdownContent({ content }: { content: string }) {
     if (parts.length > 0) return <>{parts}</>;
   }
   return <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{content}</ReactMarkdown>;
+}
+
+/**
+ * Formats message content based on interaction mode:
+ * - `mention` (@name content): highlights @name with a blue styled span
+ * - `no_ai` (#content): strips the # prefix, shows as plain text
+ * - Others: renders content as-is via Markdown
+ */
+function FormattedMessageContent({ content, interactionMode }: { content: string; interactionMode?: InteractionMode }) {
+  const displayContent = useMemo(() => {
+    const trimmed = content.trim();
+
+    // # prefix → strip it for display
+    if (interactionMode === 'no_ai' && trimmed.startsWith('#')) {
+      return trimmed.slice(1).trim();
+    }
+
+    return content;
+  }, [content, interactionMode]);
+
+  // @ mention → render @name as highlighted inline element + rest as Markdown
+  if (interactionMode === 'mention' && displayContent.trim().startsWith('@')) {
+    const trimmed = displayContent.trim();
+    const spaceIdx = trimmed.indexOf(' ');
+    if (spaceIdx > 1) {
+      const mentionName = trimmed.slice(0, spaceIdx); // "@张三"
+      const rest = trimmed.slice(spaceIdx + 1).trim();
+      return (
+        <>
+          <span className="inline-block text-blue-500 dark:text-blue-400 font-medium bg-blue-500/10 px-1 rounded mr-1">{mentionName}</span>
+          {rest && <MarkdownContent content={rest} />}
+        </>
+      );
+    }
+    // Just @name with no trailing content
+    return <span className="inline-block text-blue-500 dark:text-blue-400 font-medium bg-blue-500/10 px-1 rounded">{trimmed}</span>;
+  }
+
+  return <MarkdownContent content={displayContent} />;
 }
 
 // ========== Collapsible Tool Result Block ==========
@@ -307,6 +346,9 @@ export default function ChatMessageBubble({ message, isStreaming }: ChatMessageB
           {message.interactionMode === 'mention' && (
             <span className="text-[9px] px-1.5 py-0.5 bg-blue-500/10 text-blue-500 dark:text-blue-400 rounded-md">@提及</span>
           )}
+          {message.interactionMode === 'no_ai' && (
+            <span className="text-[9px] px-1.5 py-0.5 bg-gray-500/10 text-gray-500 dark:text-gray-400 rounded-md">纯文本</span>
+          )}
           {message.interactionMode === 'skill_invoke' && (
             <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/10 text-purple-500 dark:text-purple-400 rounded-md">技能调用</span>
           )}
@@ -317,7 +359,7 @@ export default function ChatMessageBubble({ message, isStreaming }: ChatMessageB
             : 'bg-white/50 dark:bg-white/[0.06] border-white/40 dark:border-white/[0.08] text-text-main'
         }`}>
           <div className="break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-            <MarkdownContent content={message.content} />
+            <FormattedMessageContent content={message.content} interactionMode={message.interactionMode} />
           </div>
           {isStreaming && !message.content && (
             <div className="flex items-center gap-1 text-violet-400">

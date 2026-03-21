@@ -117,24 +117,26 @@ export async function getLanMessagesByGroup(
       .limit(1);
 
     if (cursorRow) {
+      // Get messages BEFORE the cursor, ordered newest-first, then reverse
       rows = await db.select()
         .from(lanMessages)
-        .where(eq(lanMessages.groupId, groupId))
-        .orderBy(asc(lanMessages.createdAt))
+        .where(and(eq(lanMessages.groupId, groupId), lt(lanMessages.createdAt, cursorRow.createdAt)))
+        .orderBy(desc(lanMessages.createdAt))
         .limit(limit);
-
-      // Filter in code to handle same-timestamp ordering
-      rows = rows.filter((r) => r.createdAt < cursorRow.createdAt);
-      rows = rows.slice(-limit);
+      // Reverse to chronological order
+      rows.reverse();
     } else {
       rows = [];
     }
   } else {
+    // Get the LATEST N messages: order DESC to pick newest, then reverse to chronological
     rows = await db.select()
       .from(lanMessages)
       .where(eq(lanMessages.groupId, groupId))
-      .orderBy(asc(lanMessages.createdAt))
+      .orderBy(desc(lanMessages.createdAt))
       .limit(limit);
+    // Reverse to chronological order (oldest → newest)
+    rows.reverse();
   }
 
   return rows.map(mapRow);

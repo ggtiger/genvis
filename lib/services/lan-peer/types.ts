@@ -39,6 +39,7 @@ export type PeerMessageType =
   | 'HANDSHAKE_ACK'
   | 'GROUP_MESSAGE'
   | 'GROUP_CREATE'
+  | 'GROUP_UPDATE'
   | 'GROUP_JOIN'
   | 'GROUP_LEAVE'
   | 'SKILL_REQUEST'
@@ -46,6 +47,7 @@ export type PeerMessageType =
   | 'FILE_NOTIFY'
   | 'PEER_UPDATE'
   | 'HISTORY_SYNC'
+  | 'AI_STREAM_EVENT'
   | 'PING'
   | 'PONG';
 
@@ -74,7 +76,7 @@ export interface ChatGroup {
 // ========== Chat Messages ==========
 
 export type ChatMessageType = 'text' | 'file' | 'image' | 'skill_result' | 'system' | 'tool_use' | 'tool_result';
-export type InteractionMode = 'skill_invoke' | 'mention' | 'plain' | 'ai_chat';
+export type InteractionMode = 'skill_invoke' | 'mention' | 'plain' | 'ai_chat' | 'no_ai';
 export type MessageStatus = 'sending' | 'sent' | 'failed';
 
 export interface ChatMessage {
