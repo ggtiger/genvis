@@ -151,12 +151,46 @@ export async function getProjectById(id: string): Promise<Project | null> {
     .where(eq(projects.id, id))
     .limit(1);
 
-  if (!result[0]) return null;
+  if (result[0]) {
+    return {
+      ...result[0],
+      selectedModel: normalizeModelId(result[0].preferredCli ?? 'claude', result[0].selectedModel ?? undefined),
+    } as Project;
+  }
 
-  return {
-    ...result[0],
-    selectedModel: normalizeModelId(result[0].preferredCli ?? 'claude', result[0].selectedModel ?? undefined),
-  } as Project;
+  // Fallback: check if this is a LAN group workspace
+  // This allows all /api/repo/ routes to work seamlessly with group IDs,
+  // enabling FileGridView, upload, preview, etc. to be reused in group chat.
+  try {
+    const groupWorkspacePath = path.join(process.cwd(), 'data', 'lan-peer', 'groups', id, 'workspace');
+    const stat = await fs.stat(groupWorkspacePath);
+    if (stat.isDirectory()) {
+      return {
+        id,
+        name: `LAN Group`,
+        description: null,
+        initialPrompt: null,
+        repoPath: groupWorkspacePath,
+        work_directory: groupWorkspacePath,
+        preferredCli: 'claude',
+        selectedModel: null,
+        status: 'idle',
+        templateType: 'nextjs',
+        projectType: 'default',
+        mode: 'work',
+        employee_id: null,
+        permissionMode: null,
+        previewUrl: null,
+        previewPort: null,
+        fallbackEnabled: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastActiveAt: new Date().toISOString(),
+      } as unknown as Project;
+    }
+  } catch { /* not a group workspace */ }
+
+  return null;
 }
 
 /**

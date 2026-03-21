@@ -35,9 +35,43 @@ export class PeerTransport {
     this.messageHandler = handler;
   }
 
-  async startServer(port: number): Promise<void> {
+  private actualPort: number = 0;
+
+  /** Returns the port the WebSocket server is actually listening on */
+  getActualPort(): number {
+    return this.actualPort;
+  }
+
+  async startServer(port: number, maxRetries: number = 10): Promise<number> {
     const { WebSocketServer } = await import('ws');
-    this.server = new WebSocketServer({ port });
+
+    // Try binding to the requested port, auto-increment on EADDRINUSE
+    let currentPort = port;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const wss = new WebSocketServer({ port: currentPort });
+          wss.on('listening', () => {
+            this.server = wss;
+            resolve();
+          });
+          wss.on('error', (err: any) => {
+            wss.close();
+            reject(err);
+          });
+        });
+        break; // success
+      } catch (err: any) {
+        if (err?.code === 'EADDRINUSE' && attempt < maxRetries) {
+          console.log(`[LanPeer Transport] 端口 ${currentPort} 已被占用，尝试 ${currentPort + 1}`);
+          currentPort++;
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    this.actualPort = currentPort;
 
     this.server.on('connection', (ws: any) => {
       let remotePeerId: string | null = null;
@@ -91,7 +125,8 @@ export class PeerTransport {
       });
     });
 
-    console.log(`[LanPeer Transport] WebSocket 服务已启动 (port ${port})`);
+    console.log(`[LanPeer Transport] WebSocket 服务已启动 (port ${this.actualPort})`);
+    return this.actualPort;
   }
 
   async connectToPeer(peerId: string, peerName: string, ip: string, port: number): Promise<void> {

@@ -18,7 +18,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, members, enabledSkills } = await request.json();
+    const { name, members, enabledSkills, systemPrompt } = await request.json();
     if (!name || !Array.isArray(members)) {
       return NextResponse.json({ success: false, error: '请提供群组名称和成员列表' }, { status: 400 });
     }
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     const manager = getLanPeerManager();
     const creatorId = manager?.peerId || 'local';
     const groupId = randomUUID();
-    const group = await createGroup(groupId, name, creatorId, members, enabledSkills || []);
+    const group = await createGroup(groupId, name, creatorId, members, enabledSkills || [], systemPrompt);
 
     // Broadcast group creation to members
     if (manager) {

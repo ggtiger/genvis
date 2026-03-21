@@ -9,8 +9,8 @@ import { randomUUID } from 'crypto';
 import { DiscoveryService } from './discovery';
 import { PeerTransport } from './transport';
 import { lanPeerStream } from './lan-peer-stream';
-import { addMessage, getGroup } from './chat-service';
-import { appendMessage as appendMemory } from './group-memory';
+import { getGroup } from './chat-service';
+import { createLanMessage, getLanMessagesByGroup } from './lan-message-service';
 import type { PeerMessage, ChatMessage, LanPeerSettings } from './types';
 import { DEFAULT_LAN_PEER_SETTINGS } from './types';
 
@@ -28,8 +28,11 @@ export class LanPeerManager {
   }
 
   async start(wsPort: number): Promise<void> {
-    // Start WebSocket server
-    await this.transport.startServer(wsPort);
+    // Start WebSocket server (auto-increments port if occupied)
+    const actualWsPort = await this.transport.startServer(wsPort);
+
+    // Update discovery to advertise the actual WS port
+    this.discovery.setWsPort(actualWsPort);
 
     // Wire up message handler
     this.transport.onMessage((peerId, msg) => this.handleMessage(peerId, msg));
@@ -57,20 +60,106 @@ export class LanPeerManager {
     await this.transport.stopServer();
   }
 
+  /**
+   * Trigger AI reply for a message (with abort/senderId support).
+   * Called when creator receives a user message (from self or peers).
+   */
+  async triggerAIReply(groupId: string, userMessage: ChatMessage): Promise<void> {
+    const { executeLanClaude, AI_SENDER_ID, AI_SENDER_NAME } = await import('./lan-claude');
+
+    const aiRequestId = randomUUID();
+    const senderId = userMessage.senderId;
+    const group = await getGroup(groupId);
+
+    // Mark stream active with senderId + AbortController
+    const abortController = lanPeerStream.markStreamActive(groupId, aiRequestId, senderId);
+
+    // Notify local SSE that AI streaming is starting (include senderId)
+    lanPeerStream.publish({
+      type: 'ai_stream_start',
+      data: { groupId, requestId: aiRequestId, senderId, timestamp: new Date().toISOString() },
+    });
+
+    try {
+      // Execute Claude SDK (handles streaming + DB persistence internally)
+      await executeLanClaude({
+        groupId,
+        instruction: userMessage.content,
+        sessionId: group?.activeSessionId,
+        requestId: aiRequestId,
+        senderName: userMessage.senderName,
+        abortSignal: abortController.signal,
+      });
+    } finally {
+      // Clear active stream marker
+      lanPeerStream.markStreamDone(groupId);
+
+      // Safety net: always send ai_stream_end
+      lanPeerStream.publish({
+        type: 'ai_stream_end',
+        data: { groupId, requestId: aiRequestId, timestamp: new Date().toISOString() },
+      });
+    }
+
+    // After SDK completes, broadcast final AI message to peers
+    const recentMsgs = await getLanMessagesByGroup(groupId, 5);
+    const lastAIMsg = recentMsgs.reverse().find(
+      (m) => m.senderId === AI_SENDER_ID && m.requestId === aiRequestId && m.messageType === 'text'
+    );
+
+    if (lastAIMsg && group) {
+      const broadcastMsg: ChatMessage = {
+        id: lastAIMsg.id,
+        groupId,
+        senderId: AI_SENDER_ID,
+        senderName: AI_SENDER_NAME,
+        content: lastAIMsg.content,
+        messageType: 'text',
+        interactionMode: 'ai_chat',
+        timestamp: new Date(lastAIMsg.createdAt).getTime(),
+        status: 'sent',
+      };
+
+      this.transport.broadcast({
+        type: 'GROUP_MESSAGE',
+        senderId: broadcastMsg.senderId,
+        senderName: broadcastMsg.senderName,
+        timestamp: broadcastMsg.timestamp,
+        payload: { message: broadcastMsg },
+      }, group.members);
+    }
+  }
+
   private async handleMessage(fromPeerId: string, msg: PeerMessage): Promise<void> {
     switch (msg.type) {
       case 'GROUP_MESSAGE': {
         const chatMsg = msg.payload.message as ChatMessage;
         if (chatMsg && chatMsg.groupId) {
-          await addMessage(chatMsg.groupId, chatMsg);
-          // Store in group memory
-          await appendMemory(chatMsg.groupId, {
-            role: 'user',
+          // Store received message in database
+          await createLanMessage({
+            id: chatMsg.id,
+            groupId: chatMsg.groupId,
+            role: chatMsg.senderId === 'ai-assistant' ? 'assistant' : 'user',
+            messageType: chatMsg.messageType,
             content: chatMsg.content,
-            timestamp: chatMsg.timestamp,
-            source: chatMsg.senderName,
+            senderId: chatMsg.senderId,
+            senderName: chatMsg.senderName,
+            interactionMode: chatMsg.interactionMode,
           });
+
           lanPeerStream.publish({ type: 'new_message', data: { message: chatMsg } });
+
+          // If this node is the group creator and the message is a user text message,
+          // trigger AI reply on behalf of the remote sender.
+          if (chatMsg.senderId !== 'ai-assistant' && chatMsg.messageType === 'text'
+              && chatMsg.interactionMode !== 'skill_invoke') {
+            const group = await getGroup(chatMsg.groupId);
+            if (group?.creatorId === this.peerId) {
+              this.triggerAIReply(chatMsg.groupId, chatMsg).catch((err) => {
+                console.error('[LanPeer] AI reply for peer message failed:', err);
+              });
+            }
+          }
         }
         break;
       }

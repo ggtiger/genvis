@@ -65,14 +65,16 @@ export interface ChatGroup {
   creatorId: string;
   members: string[];        // peer IDs
   enabledSkills: string[];  // skills open to this group
+  systemPrompt?: string;    // custom system prompt for the group AI bot
+  activeSessionId?: string; // Claude SDK session ID for context continuity
   createdAt: number;
   updatedAt: number;
 }
 
 // ========== Chat Messages ==========
 
-export type ChatMessageType = 'text' | 'file' | 'image' | 'skill_result' | 'system';
-export type InteractionMode = 'skill_invoke' | 'mention' | 'plain';
+export type ChatMessageType = 'text' | 'file' | 'image' | 'skill_result' | 'system' | 'tool_use' | 'tool_result';
+export type InteractionMode = 'skill_invoke' | 'mention' | 'plain' | 'ai_chat';
 export type MessageStatus = 'sending' | 'sent' | 'failed';
 
 export interface ChatMessage {
@@ -86,6 +88,8 @@ export interface ChatMessage {
   mentionedPeers?: string[];
   fileInfo?: FileTransferInfo;
   skillResult?: SkillCallResult;
+  metadata?: Record<string, unknown>;
+  isStreaming?: boolean;        // true while AI is still generating
   timestamp: number;
   status: MessageStatus;
 }

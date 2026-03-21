@@ -8,6 +8,7 @@
 
 import { NextRequest } from 'next/server';
 import { lanPeerStream } from '@/lib/services/lan-peer/lan-peer-stream';
+import { getLanPeerManager } from '@/lib/services/lan-peer/manager';
 
 export const maxDuration = 300;
 
@@ -17,13 +18,27 @@ export async function GET(request: NextRequest) {
       let ctrl: ReadableStreamDefaultController | null = controller;
       const connectionId = lanPeerStream.addConnection(controller);
 
-      // Welcome
+      // Welcome — include local peerId so frontend knows who "I" am
       try {
+        const manager = getLanPeerManager();
+        const localPeerId = manager?.peerId || (globalThis as any).__lan_peer_id__ || 'local';
         const welcome = `data: ${JSON.stringify({
           type: 'connected',
-          data: { connectionId, timestamp: new Date().toISOString() },
+          data: { connectionId, localPeerId, timestamp: new Date().toISOString() },
         })}\n\n`;
         controller.enqueue(new TextEncoder().encode(welcome));
+      } catch { /* ignore */ }
+
+      // Send active AI stream states so reconnecting clients can restore streaming indicators
+      try {
+        const activeStreams = lanPeerStream.getActiveStreams();
+        for (const [groupId, info] of activeStreams) {
+          const resumeEvent = `data: ${JSON.stringify({
+            type: 'ai_stream_start',
+            data: { groupId, requestId: info.requestId, senderId: info.senderId, timestamp: info.startedAt, resumed: true },
+          })}\n\n`;
+          controller.enqueue(new TextEncoder().encode(resumeEvent));
+        }
       } catch { /* ignore */ }
 
       // Heartbeat every 8s

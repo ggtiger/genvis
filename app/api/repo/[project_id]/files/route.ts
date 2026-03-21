@@ -8,6 +8,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getProjectById } from '@/lib/services/project';
 import { isOfficeOrPdf, addContextFile } from '@/lib/services/context-files';
+import { resolveGroupProxyUrl } from '@/lib/services/lan-peer/group-file-proxy';
 
 interface RouteContext {
   params: Promise<{ project_id: string }>;
@@ -34,7 +35,29 @@ function safePath(root: string, rel: string): string {
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
     const { project_id } = await params;
-    const root = await resolveProjectRoot(project_id);
+
+    // Check if project exists locally
+    let root: string;
+    try {
+      root = await resolveProjectRoot(project_id);
+    } catch {
+      // Not a local project — try proxying to group creator
+      const proxyBaseUrl = await resolveGroupProxyUrl(project_id);
+      if (proxyBaseUrl) {
+        const body = await request.json();
+        const proxyUrl = `${proxyBaseUrl}/api/repo/${project_id}/files`;
+        const proxyRes = await fetch(proxyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(15000),
+        });
+        const data = await proxyRes.json();
+        return NextResponse.json(data, { status: proxyRes.status });
+      }
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
     const body = await request.json();
     const { action } = body;
 
@@ -114,7 +137,28 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 export async function PUT(request: NextRequest, { params }: RouteContext) {
   try {
     const { project_id } = await params;
-    const root = await resolveProjectRoot(project_id);
+
+    // Check if project exists locally
+    let root: string;
+    try {
+      root = await resolveProjectRoot(project_id);
+    } catch {
+      // Not a local project — try proxying to group creator (forward FormData)
+      const proxyBaseUrl = await resolveGroupProxyUrl(project_id);
+      if (proxyBaseUrl) {
+        const formData = await request.formData();
+        const proxyUrl = `${proxyBaseUrl}/api/repo/${project_id}/files`;
+        const proxyRes = await fetch(proxyUrl, {
+          method: 'PUT',
+          body: formData,
+          signal: AbortSignal.timeout(60000),
+        });
+        const data = await proxyRes.json();
+        return NextResponse.json(data, { status: proxyRes.status });
+      }
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
     const formData = await request.formData();
     const dir = (formData.get('dir') as string) || '.';
     const files = formData.getAll('files') as File[];

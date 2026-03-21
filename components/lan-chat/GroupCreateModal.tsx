@@ -13,6 +13,7 @@ interface GroupCreateModalProps {
 
 export default function GroupCreateModal({ peers, selfInfo, onClose, onCreated }: GroupCreateModalProps) {
   const [name, setName] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<string[]>(() =>
     selfInfo ? [selfInfo.id] : []
   );
@@ -33,7 +34,7 @@ export default function GroupCreateModal({ peers, selfInfo, onClose, onCreated }
       const res = await fetch('/api/lan-peer/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), members: selectedMembers, enabledSkills: [] }),
+        body: JSON.stringify({ name: name.trim(), members: selectedMembers, enabledSkills: [], systemPrompt: systemPrompt.trim() || undefined }),
       });
       const data = await res.json();
       if (data.success) onCreated();
@@ -59,6 +60,19 @@ export default function GroupCreateModal({ peers, selfInfo, onClose, onCreated }
               onChange={(e) => setName(e.target.value)}
               placeholder="输入群组名称"
               className="w-full px-3 py-2 rounded-lg border border-border-subtle bg-white dark:bg-slate-700 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-text-main block mb-1">
+              AI 提示词 <span className="text-xs text-text-secondary font-normal">(可选，自定义机器人人设)</span>
+            </label>
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder={`设定 AI 助手的性格、行为规则和回复风格...
+留空则使用默认提示词 + 设置页的 SOUL`}
+              rows={3}
+              className="w-full px-3 py-2 rounded-lg border border-border-subtle bg-white dark:bg-slate-700 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none font-mono"
             />
           </div>
           <div>

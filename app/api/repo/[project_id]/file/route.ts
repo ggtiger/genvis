@@ -12,6 +12,7 @@ import {
   FileBrowserError,
 } from '@/lib/services/file-browser';
 import { getProjectById } from '@/lib/services/project';
+import { resolveGroupProxyUrl } from '@/lib/services/lan-peer/group-file-proxy';
 
 interface RouteContext {
   params: Promise<{ project_id: string }>;
@@ -109,6 +110,28 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       );
     }
 
+    // Check if project exists locally (includes virtual group workspace on creator's machine)
+    const project = await getProjectById(project_id);
+    if (!project) {
+      // Not a local project — try proxying to group creator
+      const proxyBaseUrl = await resolveGroupProxyUrl(project_id);
+      if (proxyBaseUrl) {
+        const proxyUrl = `${proxyBaseUrl}/api/repo/${project_id}/file?${searchParams.toString()}`;
+        const proxyRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(30000) });
+        if (!proxyRes.ok) {
+          return new NextResponse(await proxyRes.text(), { status: proxyRes.status });
+        }
+        const contentType = proxyRes.headers.get('content-type') || 'application/octet-stream';
+        const body = await proxyRes.arrayBuffer();
+        const resp = new NextResponse(Buffer.from(body) as unknown as BodyInit);
+        resp.headers.set('Content-Type', contentType);
+        resp.headers.set('Content-Length', String(body.byteLength));
+        resp.headers.set('Cache-Control', 'no-store');
+        return resp;
+      }
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
     // Raw mode: return binary file directly
     if (raw) {
       const absolutePath = await resolveProjectFilePath(project_id, filePath);
@@ -164,6 +187,27 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 export async function PUT(request: NextRequest, { params }: RouteContext) {
   try {
     const { project_id } = await params;
+
+    // Check if project exists locally
+    const project = await getProjectById(project_id);
+    if (!project) {
+      // Not a local project — try proxying to group creator
+      const proxyBaseUrl = await resolveGroupProxyUrl(project_id);
+      if (proxyBaseUrl) {
+        const body = await request.json();
+        const proxyUrl = `${proxyBaseUrl}/api/repo/${project_id}/file`;
+        const proxyRes = await fetch(proxyUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = await proxyRes.json();
+        return NextResponse.json(data, { status: proxyRes.status });
+      }
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
     const body = await request.json();
     const path = body?.path;
     const content = body?.content;

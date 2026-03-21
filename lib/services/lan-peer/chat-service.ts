@@ -38,6 +38,7 @@ export async function createGroup(
   creatorId: string,
   members: string[],
   enabledSkills: string[] = [],
+  systemPrompt?: string,
 ): Promise<ChatGroup> {
   const now = Date.now();
   const group: ChatGroup = {
@@ -46,6 +47,7 @@ export async function createGroup(
     creatorId,
     members,
     enabledSkills,
+    ...(systemPrompt ? { systemPrompt } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -81,15 +83,25 @@ export async function getGroups(): Promise<ChatGroup[]> {
   }
 }
 
-export async function updateGroup(groupId: string, partial: Partial<Pick<ChatGroup, 'name' | 'members' | 'enabledSkills'>>): Promise<ChatGroup | null> {
+export async function updateGroup(groupId: string, partial: Partial<Pick<ChatGroup, 'name' | 'members' | 'enabledSkills' | 'systemPrompt'>>): Promise<ChatGroup | null> {
   const group = await getGroup(groupId);
   if (!group) return null;
   if (partial.name !== undefined) group.name = partial.name;
   if (partial.members !== undefined) group.members = partial.members;
   if (partial.enabledSkills !== undefined) group.enabledSkills = partial.enabledSkills;
+  if (partial.systemPrompt !== undefined) group.systemPrompt = partial.systemPrompt;
   group.updatedAt = Date.now();
   await fs.writeFile(groupFile(groupId), JSON.stringify(group, null, 2), 'utf8');
   return group;
+}
+
+/** Update the Claude SDK session ID for a group (for conversation context continuity). */
+export async function updateGroupSession(groupId: string, sessionId: string): Promise<void> {
+  const group = await getGroup(groupId);
+  if (!group) return;
+  group.activeSessionId = sessionId;
+  group.updatedAt = Date.now();
+  await fs.writeFile(groupFile(groupId), JSON.stringify(group, null, 2), 'utf8');
 }
 
 export async function deleteGroup(groupId: string): Promise<boolean> {

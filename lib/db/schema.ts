@@ -154,6 +154,26 @@ export const userRequests = sqliteTable('user_requests', {
   statusIdx: index('idx_user_requests_status').on(table.status)
 }));
 
+// LAN Messages table (LAN peer chat messages — separate from project messages)
+export const lanMessages = sqliteTable('lan_messages', {
+  id: text('id').primaryKey(),
+  groupId: text('group_id').notNull(),
+  role: text('role').notNull(),                     // 'user' | 'assistant' | 'tool'
+  messageType: text('message_type').notNull(),       // 'text' | 'tool_use' | 'tool_result' | 'system'
+  content: text('content').notNull(),
+  senderId: text('sender_id'),
+  senderName: text('sender_name'),
+  interactionMode: text('interaction_mode'),
+  metadataJson: text('metadata_json'),
+  sessionId: text('session_id'),
+  requestId: text('request_id'),
+  createdAt: text('created_at').notNull(),
+}, (table) => ({
+  groupIdIdx: index('idx_lan_messages_group_id').on(table.groupId),
+  createdAtIdx: index('idx_lan_messages_created_at').on(table.createdAt),
+  sessionIdIdx: index('idx_lan_messages_session_id').on(table.sessionId),
+}));
+
 // ServiceTokens table
 export const serviceTokens = sqliteTable('service_tokens', {
   id: text('id').primaryKey(),

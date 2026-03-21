@@ -124,6 +124,11 @@ export class DiscoveryService {
     return this.registry;
   }
 
+  /** Update the WebSocket port advertised in broadcasts (e.g. after auto-increment) */
+  setWsPort(port: number): void {
+    this.wsPort = port;
+  }
+
   async start(): Promise<void> {
     const dgram = await import('dgram');
     const { getPrimaryLanIP } = await import('@/lib/utils/network');

@@ -398,13 +398,14 @@ function extractPathsFromToolInput(toolName: string, toolInput: Record<string, u
         /\bmv\s+[^\s]+\s+([/~][^\s;|&]+)/g,
         /\bcp\s+(?:-[rfR]+\s+)?[^\s]+\s+([/~][^\s;|&]+)/g,
         /\b(?:chmod|chown)\s+[^\s]+\s+([/~][^\s;|&]+)/g,
-        /\b>\s*([/~][^\s;|&]+)/g,  // redirect output to file
+        /(?<!\d)\b>\s*([/~][^\s;|&]+)/g,  // redirect output to file (exclude FD redirects like 2>)
         /\btee\s+(?:-a\s+)?([/~][^\s;|&]+)/g,
       ];
       for (const pattern of dangerousPatterns) {
         let match;
         while ((match = pattern.exec(command)) !== null) {
-          if (match[1]) paths.push(match[1]);
+          // Skip /dev/null and other /dev/ special device paths
+          if (match[1] && !match[1].startsWith('/dev/')) paths.push(match[1]);
         }
       }
     }

@@ -15,6 +15,7 @@ export default function LanChatLayout() {
   const [groups, setGroups] = useState<ChatGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [activeAIGroupIds, setActiveAIGroupIds] = useState<Set<string>>(new Set());
 
   // Fetch local node info once on mount
   useEffect(() => {
@@ -52,6 +53,12 @@ export default function LanChatLayout() {
       try {
         const data = JSON.parse(event.data);
         switch (data.type) {
+          case 'connected':
+            // SSE reconnected — reset active AI indicators, then let
+            // the subsequent ai_stream_start events (from active streams
+            // sent on connection) re-populate only truly active groups.
+            setActiveAIGroupIds(new Set());
+            break;
           case 'peer_online':
           case 'peer_offline':
             loadPeers();
@@ -60,6 +67,28 @@ export default function LanChatLayout() {
           case 'group_updated':
             loadGroups();
             break;
+          case 'group_deleted': {
+            const deletedId = data.data?.groupId;
+            if (deletedId) {
+              setGroups((prev) => prev.filter((g) => g.id !== deletedId));
+              setSelectedGroupId((prev) => (prev === deletedId ? null : prev));
+            }
+            break;
+          }
+          case 'ai_stream_start': {
+            const gid = data.data?.groupId;
+            if (gid) setActiveAIGroupIds((prev) => new Set(prev).add(gid));
+            break;
+          }
+          case 'ai_stream_end': {
+            const gid = data.data?.groupId;
+            if (gid) setActiveAIGroupIds((prev) => {
+              const next = new Set(prev);
+              next.delete(gid);
+              return next;
+            });
+            break;
+          }
         }
       } catch { /* ignore */ }
     };
@@ -71,19 +100,32 @@ export default function LanChatLayout() {
     loadGroups();
   };
 
+  const handleDeleteGroup = async (groupId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/lan-peer/groups/${groupId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        setGroups((prev) => prev.filter((g) => g.id !== groupId));
+        if (selectedGroupId === groupId) setSelectedGroupId(null);
+      }
+    } catch { /* ignore */ }
+  };
+
   const selectedGroup = groups.find((g) => g.id === selectedGroupId) || null;
 
   return (
     <div className="flex h-full">
       {/* Left panel: peers + groups */}
-      <div className="w-72 border-r border-white/10 flex flex-col">
+      <div className="w-64 flex flex-col bg-white/20 dark:bg-white/[0.02] border-r border-white/10 dark:border-white/[0.04]">
         <PeerStatusBar peers={peers} selfInfo={selfInfo} />
         <div className="flex-1 overflow-y-auto">
           <GroupList
             groups={groups}
             selectedGroupId={selectedGroupId}
+            activeGroupIds={activeAIGroupIds}
             onSelect={setSelectedGroupId}
             onCreate={() => setShowCreateModal(true)}
+            onDelete={handleDeleteGroup}
           />
         </div>
       </div>
@@ -91,13 +133,15 @@ export default function LanChatLayout() {
       {/* Right panel: chat */}
       <div className="flex-1 flex flex-col min-w-0">
         {selectedGroup ? (
-          <GroupChatPanel group={selectedGroup} peers={peers} />
+          <GroupChatPanel key={selectedGroup.id} group={selectedGroup} peers={peers} onDeleteGroup={handleDeleteGroup} />
         ) : (
           <div className="flex-1 flex items-center justify-center">
-            <div className="text-center text-slate-500 dark:text-slate-400">
-              <p className="text-5xl mb-4">💬</p>
-              <p className="text-sm font-medium">选择一个群组开始聊天</p>
-              <p className="text-xs mt-1 opacity-60">或创建一个新群组</p>
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-2xl bg-white/20 dark:bg-white/[0.04] flex items-center justify-center mx-auto mb-4">
+                <span className="text-3xl">💬</span>
+              </div>
+              <p className="text-sm font-medium text-text-main/80">选择一个群组开始聊天</p>
+              <p className="text-[11px] mt-1.5 text-text-secondary/50">或在左侧创建一个新群组</p>
             </div>
           </div>
         )}

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Folder, FolderPlus, FilePlus, Upload, Trash2, Pencil, Copy, Move, MoreHorizontal, BookmarkPlus, RotateCcw, Plus, Minus, History, GitCompare } from 'lucide-react';
+import { Folder, FolderPlus, FilePlus, Upload, Trash2, Pencil, Copy, Move, MoreHorizontal, BookmarkPlus, RotateCcw, Plus, Minus, History, GitCompare, ChevronRight } from 'lucide-react';
 import type { GitFileStatus, GitStatusResult } from '@/types/shared/git';
 import {
   WordIcon, ExcelIcon, PowerPointIcon, PdfIcon,
@@ -29,6 +29,8 @@ interface FileGridViewProps {
   onFileClick?: (file: FileItem) => void;
   onFolderClick?: (folder: FileItem) => void;
   onRefresh?: () => void;
+  /** Compact list mode for narrow panels (e.g. sidebar) */
+  compact?: boolean;
   // Git integration props (context menu only)
   gitInfo?: GitStatusResult;
   onGitStage?: (file: FileItem, action: 'stage' | 'restore' | 'restore-staged') => Promise<void>;
@@ -57,12 +59,19 @@ const truncateFileName = (name: string): string => {
   return truncated + '...';
 };
 
-function getFileIcon(file: FileItem): React.ReactElement {
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function getFileIconSized(file: FileItem, size: number): React.ReactElement {
   if (file.type === 'directory') {
-    return <Folder size={48} className="text-blue-500" />;
+    return <Folder size={size} className="text-blue-500" />;
   }
   const ext = file.name.split('.').pop()?.toLowerCase();
-  const s = 48;
+  const s = size;
   switch (ext) {
     case 'png': return <PngIcon size={s} />;
     case 'jpg': case 'jpeg': return <JpgIcon size={s} />;
@@ -104,6 +113,10 @@ function getFileIcon(file: FileItem): React.ReactElement {
     case 'toml': case 'ini': case 'conf': case 'config': return <TomlIcon size={s} />;
     default: return <GenericFileIcon size={s} />;
   }
+}
+
+function getFileIcon(file: FileItem): React.ReactElement {
+  return getFileIconSized(file, 48);
 }
 
 export async function fileOp(projectId: string, body: Record<string, any>) {
@@ -411,7 +424,7 @@ export function PromptDialog({ title, defaultValue, onConfirm, onCancel }: {
   );
 }
 
-export default function FileGridView({ files, projectId, currentDir = '.', onFileClick, onFolderClick, onRefresh, gitInfo, onGitStage, onGitDiff, onGitLog }: FileGridViewProps) {
+export default function FileGridView({ files, projectId, currentDir = '.', onFileClick, onFolderClick, onRefresh, compact, gitInfo, onGitStage, onGitDiff, onGitLog }: FileGridViewProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: FileItem } | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
@@ -545,6 +558,8 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
     }
   };
 
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
   // Drag & drop
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -575,8 +590,102 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* File grid */}
-      <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3 p-4">
+      {/* File grid / compact list */}
+      {compact ? (
+        <>
+          {/* Compact toolbar: new file, new folder, upload */}
+          {projectId && (
+            <div className="flex items-center gap-1 px-2.5 py-2 border-b border-white/10 dark:border-white/[0.04] shrink-0">
+              <button
+                onClick={handleNewFile}
+                className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] rounded-lg hover:bg-white/25 dark:hover:bg-white/[0.06] text-text-secondary/70 hover:text-text-main transition-colors"
+                title="新建文件"
+              >
+                <FilePlus size={13} />
+                <span>新建文件</span>
+              </button>
+              <button
+                onClick={handleNewFolder}
+                className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] rounded-lg hover:bg-white/25 dark:hover:bg-white/[0.06] text-text-secondary/70 hover:text-text-main transition-colors"
+                title="新建文件夹"
+              >
+                <FolderPlus size={13} />
+                <span>文件夹</span>
+              </button>
+              <button
+                onClick={() => uploadInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] rounded-lg hover:bg-white/25 dark:hover:bg-white/[0.06] text-text-secondary/70 hover:text-text-main transition-colors ml-auto"
+                title="上传文件"
+              >
+                <Upload size={13} />
+                <span>上传</span>
+              </button>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => { if (e.target.files?.length) { handleUpload(e.target.files); e.target.value = ''; } }}
+              />
+            </div>
+          )}
+          <div className="flex flex-col p-2 gap-0.5 overflow-y-auto flex-1">
+          {files.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-gray-400 dark:text-gray-500">
+              <Folder className="w-8 h-8 mb-2 opacity-40" />
+              <span className="text-[11px]">暂无文件</span>
+              <span className="text-[10px] mt-0.5">拖放文件或右键新建</span>
+            </div>
+          ) : files.map((file) => (
+            <div
+              key={file.path}
+              data-file-item
+              className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-white/25 dark:hover:bg-white/[0.06] transition-colors group"
+              onClick={() => handleClick(file)}
+              onContextMenu={(e) => handleContextMenu(e, file)}
+              title={file.name}
+            >
+              <div className="relative shrink-0 flex items-center justify-center w-7 h-7">
+                {getFileIconSized(file, 28)}
+              </div>
+              {renamingPath === file.path ? (
+                <InlineRename
+                  initialName={file.name}
+                  onConfirm={(newName) => handleRename(file, newName)}
+                  onCancel={() => setRenamingPath(null)}
+                />
+              ) : (
+                <div className="flex-1 min-w-0">
+                  <div className={`text-[12px] truncate ${getGitFileNameClass(file.gitStatus)}`}>{file.name}</div>
+                  {file.type === 'file' && file.size !== undefined && (
+                    <div className="text-[10px] text-gray-400 dark:text-gray-500">{formatSize(file.size)}</div>
+                  )}
+                </div>
+              )}
+              {file.type === 'directory' && (
+                <ChevronRight className="w-3 h-3 text-gray-400/40 shrink-0" />
+              )}
+              {projectId && file.type === 'file' && (
+                <button
+                  className="p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-white/30 dark:hover:bg-white/[0.08] text-gray-400 hover:text-blue-500 transition-all shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const itemEl = (e.currentTarget as HTMLElement).closest('[data-file-item]') as HTMLElement;
+                    if (itemEl) {
+                      const rect = itemEl.getBoundingClientRect();
+                      setContextMenu({ x: rect.right - 10, y: rect.bottom, file });
+                    }
+                  }}
+                >
+                  <MoreHorizontal size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        </>
+      ) : (
+        <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3 p-4">
         {files.map((file) => (
           <div
             key={file.path}
@@ -644,6 +753,7 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
           </div>
         ))}
       </div>
+      )}
 
       {/* Drag overlay */}
       {isDragOver && (
@@ -667,6 +777,9 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
           onDelete={() => setDeleteTarget(contextMenu.file)}
           onCopy={() => handleCopy(contextMenu.file)}
           onMove={() => handleMove(contextMenu.file)}
+          onNewFile={projectId ? () => { setContextMenu(null); handleNewFile(); } : undefined}
+          onNewFolder={projectId ? () => { setContextMenu(null); handleNewFolder(); } : undefined}
+          onUpload={projectId ? () => { setContextMenu(null); uploadInputRef.current?.click(); } : undefined}
           onGitStage={onGitStage ? (file, action) => { onGitStage(file, action); setContextMenu(null); } : undefined}
           onGitDiff={onGitDiff ? (file, from, to) => { onGitDiff(file, from, to); setContextMenu(null); } : undefined}
           onGitLog={onGitLog ? (file) => { onGitLog(file); setContextMenu(null); } : undefined}

@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { listProjectDirectory, FileBrowserError } from '@/lib/services/file-browser';
+import { resolveGroupProxyUrl } from '@/lib/services/lan-peer/group-file-proxy';
 
 interface RouteContext {
   params: Promise<{ project_id: string }>;
@@ -16,7 +17,22 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     const { searchParams } = new URL(request.url);
     const dir = searchParams.get('dir') ?? '.';
 
-    const entries = await listProjectDirectory(project_id, dir);
+    let entries;
+    try {
+      entries = await listProjectDirectory(project_id, dir);
+    } catch (localErr) {
+      // Project not found locally — try proxying to group creator
+      const proxyBaseUrl = await resolveGroupProxyUrl(project_id);
+      if (proxyBaseUrl) {
+        const proxyUrl = `${proxyBaseUrl}/api/repo/${project_id}/tree?dir=${encodeURIComponent(dir)}`;
+        const proxyRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+        const data = await proxyRes.json();
+        const resp = NextResponse.json(data);
+        resp.headers.set('Cache-Control', 'no-store');
+        return resp;
+      }
+      throw localErr;
+    }
 
     const payload = entries.map((entry) => ({
       path: entry.path,

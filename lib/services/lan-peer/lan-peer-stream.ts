@@ -8,12 +8,23 @@
 import { randomUUID } from 'crypto';
 
 export interface LanPeerEvent {
-  type: 'connected' | 'new_message' | 'peer_online' | 'peer_offline' | 'group_created' | 'group_updated';
+  type: 'connected' | 'new_message' | 'peer_online' | 'peer_offline'
+    | 'group_created' | 'group_updated'
+    | 'ai_stream_start' | 'ai_stream_delta' | 'ai_stream_end'
+    | 'ai_tool_use' | 'ai_tool_result'
+    | 'group_deleted';
   data: Record<string, unknown>;
 }
 
 class LanPeerStreamManager {
   private connections = new Set<ReadableStreamDefaultController>();
+  /** Currently active AI streams: groupId -> { requestId, startedAt, senderId, abortController } */
+  private activeStreams = new Map<string, {
+    requestId: string;
+    startedAt: string;
+    senderId: string;
+    abortController: AbortController;
+  }>();
 
   addConnection(controller: ReadableStreamDefaultController): string {
     const id = randomUUID();
@@ -34,6 +45,34 @@ class LanPeerStreamManager {
       try { controller.enqueue(encoded); } catch { dead.push(controller); }
     }
     for (const c of dead) this.removeConnection(c);
+  }
+
+  /** Mark a group as actively streaming AI content. Returns an AbortController for cancellation. */
+  markStreamActive(groupId: string, requestId: string, senderId: string): AbortController {
+    const abortController = new AbortController();
+    this.activeStreams.set(groupId, { requestId, startedAt: new Date().toISOString(), senderId, abortController });
+    return abortController;
+  }
+
+  /** Remove active stream marker for a group */
+  markStreamDone(groupId: string): void {
+    this.activeStreams.delete(groupId);
+  }
+
+  /** Abort an active AI stream. Only the original sender can abort. */
+  abortStream(groupId: string, requesterId: string): { success: boolean; error?: string } {
+    const stream = this.activeStreams.get(groupId);
+    if (!stream) return { success: false, error: '没有正在进行的AI响应' };
+    if (stream.senderId !== requesterId) return { success: false, error: '只能终止自己发送的消息' };
+    stream.abortController.abort();
+    return { success: true };
+  }
+
+  /** Get all currently active AI streams (for SSE reconnection) */
+  getActiveStreams(): Map<string, { requestId: string; startedAt: string; senderId: string }> {
+    return new Map(
+      Array.from(this.activeStreams.entries()).map(([k, v]) => [k, { requestId: v.requestId, startedAt: v.startedAt, senderId: v.senderId }])
+    );
   }
 
   get connectionCount(): number {
