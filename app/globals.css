@@ -165,7 +165,7 @@
     position: relative;
   }
   .glass-card {
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.2);
     transition: background 0.2s ease;
   }
@@ -186,7 +186,7 @@
     border: 1px solid rgba(255, 215, 0, 0.15);
   }
   .glass-card:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.5);
   }
   :is(.dark .glass-card:hover) {
      background: rgba(30, 41, 59, 0.72);

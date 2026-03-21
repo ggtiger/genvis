@@ -680,7 +680,7 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
               </div>
             )}
             {messages.map((msg) => (
-              <ChatMessageBubble key={msg.id} message={msg} />
+              <ChatMessageBubble key={msg.id} message={msg} localPeerId={localPeerId} />
             ))}
             {streamingMessage && (
               <ChatMessageBubble key="streaming" message={streamingMessage} isStreaming />

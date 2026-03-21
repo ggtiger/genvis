@@ -226,14 +226,16 @@ function ToolResultBlock({ icon: Icon, label, color, bgClass, borderClass, toolN
 interface ChatMessageBubbleProps {
   message: ChatMessage;
   isStreaming?: boolean;
+  localPeerId?: string;
 }
 
-export default function ChatMessageBubble({ message, isStreaming }: ChatMessageBubbleProps) {
+export default function ChatMessageBubble({ message, isStreaming, localPeerId }: ChatMessageBubbleProps) {
   const isSystem = message.messageType === 'system';
   const isSkillResult = message.messageType === 'skill_result';
   const isToolUse = message.messageType === 'tool_use';
   const isToolResult = message.messageType === 'tool_result';
   const isAI = message.senderId === 'ai-assistant';
+  const isSelf = !!localPeerId && message.senderId === localPeerId;
 
   if (isSystem) {
     return (
@@ -323,16 +325,22 @@ export default function ChatMessageBubble({ message, isStreaming }: ChatMessageB
   const time = new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
   return (
-    <div className="flex gap-2.5 max-w-2xl">
-      <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-medium shrink-0 ${
-        isAI
-          ? 'bg-gradient-to-br from-violet-100 to-blue-100 dark:from-violet-500/15 dark:to-blue-500/15 text-violet-600 dark:text-violet-400'
-          : 'bg-primary/8 text-primary'
-      }`}>
-        {isAI ? '✨' : message.senderName.charAt(0)}
+    <div className={`flex gap-3 max-w-3xl group ${isSelf ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}>
+      {/* Avatar */}
+      <div className="shrink-0">
+        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium shadow-sm ${
+          isAI
+            ? 'bg-gradient-to-br from-violet-100 to-blue-100 dark:from-violet-500/15 dark:to-blue-500/15 text-violet-600 dark:text-violet-400'
+            : isSelf
+              ? 'bg-white/20 dark:bg-white/10 border border-white/20 dark:border-white/10 text-text-main'
+              : 'bg-primary/10 text-primary border border-primary/10'
+        }`}>
+          {isAI ? '✨' : message.senderName.charAt(0)}
+        </div>
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 mb-1">
+      {/* Content */}
+      <div className={`flex flex-col gap-1 min-w-0 ${isSelf ? 'items-end' : 'items-start'}`}>
+        <div className={`flex items-baseline gap-2 ${isSelf ? 'flex-row-reverse' : ''}`}>
           <span className={`text-[13px] font-medium ${
             isAI ? 'text-violet-600 dark:text-violet-400' : 'text-text-main'
           }`}>{message.senderName}</span>
@@ -353,12 +361,16 @@ export default function ChatMessageBubble({ message, isStreaming }: ChatMessageB
             <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/10 text-purple-500 dark:text-purple-400 rounded-md">技能调用</span>
           )}
         </div>
-        <div className={`p-3 rounded-2xl rounded-tl-sm border text-sm ${
-          isAI
-            ? 'bg-white/40 dark:bg-white/[0.04] border-white/30 dark:border-white/[0.06] text-text-main'
-            : 'bg-white/50 dark:bg-white/[0.06] border-white/40 dark:border-white/[0.08] text-text-main'
+        <div className={`p-3.5 text-sm leading-relaxed break-words ${
+          isSelf
+            ? 'bg-primary text-white rounded-2xl rounded-tr-none shadow-lg shadow-primary/20'
+            : isAI
+              ? 'bg-white/40 dark:bg-[rgba(30,41,59,0.7)] backdrop-blur-md rounded-2xl rounded-tl-none border border-white/50 dark:border-white/[0.08] text-text-main shadow-sm'
+              : 'bg-white/40 dark:bg-white/[0.06] backdrop-blur-sm rounded-2xl rounded-tl-none border border-white/30 dark:border-white/[0.06] text-text-main shadow-sm'
         }`}>
-          <div className="break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <div className={`break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 ${
+            isSelf ? '[&_code]:bg-white/20 [&_a]:text-white [&_a]:underline' : ''
+          }`}>
             <FormattedMessageContent content={message.content} interactionMode={message.interactionMode} />
           </div>
           {isStreaming && !message.content && (
@@ -370,7 +382,7 @@ export default function ChatMessageBubble({ message, isStreaming }: ChatMessageB
           )}
         </div>
         {message.fileInfo && (
-          <div className="mt-2 flex items-center gap-2 px-3 py-2 bg-white/30 dark:bg-slate-800/30 rounded-lg border border-border-subtle text-xs">
+          <div className="mt-1 flex items-center gap-2 px-3 py-2 bg-white/30 dark:bg-slate-800/30 rounded-lg border border-border-subtle text-xs">
             {message.messageType === 'image' ? '🖼️' : '📎'}
             <span className="truncate">{message.fileInfo.name}</span>
             <span className="text-text-secondary">({(message.fileInfo.size / 1024).toFixed(1)}KB)</span>
