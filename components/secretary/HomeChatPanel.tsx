@@ -2,11 +2,11 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Paperclip, Mic, Sparkles, ArrowUp, User, X, Image as ImageIcon, FileText as FileTextIcon, Copy, Check } from 'lucide-react';
+import { Paperclip, Mic, MicOff, Sparkles, ArrowUp, User, X, Image as ImageIcon, FileText as FileTextIcon, Copy, Check, Clock, Plus, Minus, Play, Bot, Save } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useToast } from '@/contexts/ToastContext';
-import type { SecretaryMessage, SecretaryAction, SecretaryAttachment } from '@/lib/services/secretary-session';
+import type { SecretaryMessage, SecretaryAction, SecretaryAttachment, SecretaryScheduledMessage } from '@/lib/services/secretary-session';
 import type { Employee } from '@/types/backend/employee';
 import PeerMentionMenu from '@/components/lan-chat/PeerMentionMenu';
 import type { PeerInfo } from '@/components/lan-chat/PeerMentionMenu';
@@ -703,6 +703,114 @@ export default function HomeChatPanel({ onActionComplete }: HomeChatPanelProps) 
   const [replyingToProject, setReplyingToProject] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState<string>('');
 
+  // ---- Voice input state ----
+  const [isListening, setIsListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  // Check browser speech recognition support
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setVoiceSupported(!!SR);
+  }, []);
+
+  const toggleVoiceInput = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      toast.error('当前浏览器不支持语音识别');
+      return;
+    }
+
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SR();
+    recognition.lang = 'zh-CN';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.maxAlternatives = 1;
+
+    let finalTranscript = '';
+
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interim = transcript;
+        }
+      }
+      // Update input with final + interim text
+      setInputValue((prev) => {
+        const base = prev.endsWith('...') ? prev.slice(0, prev.lastIndexOf(finalTranscript || '')) : prev;
+        // Only use finalTranscript as stable base
+        return finalTranscript + (interim ? interim : '');
+      });
+    };
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      finalTranscript = inputValue; // preserve existing text
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.onerror = (event: any) => {
+      console.warn('[Voice] Recognition error:', event.error);
+      if (event.error === 'not-allowed') {
+        toast.error('麦克风权限被拒绝，请在浏览器设置中允许');
+      } else if (event.error === 'network') {
+        toast.error('语音识别需要网络连接（需要代理/VPN）');
+      } else if (event.error !== 'aborted') {
+        toast.error(`语音识别出错: ${event.error}`);
+      }
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [isListening, inputValue, toast]);
+
+  // Cleanup recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
+
+  // ---- Scheduled messages state ----
+  const [showScheduledPanel, setShowScheduledPanel] = useState(false);
+  const [scheduledMsgs, setScheduledMsgs] = useState<SecretaryScheduledMessage[]>([]);
+  const [savingScheduled, setSavingScheduled] = useState(false);
+  const [triggeringMsg, setTriggeringMsg] = useState<string | null>(null);
+  const scheduledMsgsRef = useRef(scheduledMsgs);
+  const blurSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduledPanelRef = useRef<HTMLDivElement>(null);
+  scheduledMsgsRef.current = scheduledMsgs;
+
+  // Click outside to close scheduled panel
+  useEffect(() => {
+    if (!showScheduledPanel) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (scheduledPanelRef.current && !scheduledPanelRef.current.contains(e.target as Node)) {
+        setShowScheduledPanel(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showScheduledPanel]);
+
   // ---- Load employees for @mention ----
   useEffect(() => {
     let cancelled = false;
@@ -740,6 +848,111 @@ export default function HomeChatPanel({ onActionComplete }: HomeChatPanelProps) 
     const interval = setInterval(fetchPeers, 30000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
+
+  // ---- Load scheduled messages on mount ----
+  useEffect(() => {
+    async function fetchScheduled() {
+      try {
+        const res = await fetch(`${API_BASE}/api/chat/home/secretary/scheduled-messages`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.data) setScheduledMsgs(data.data);
+        }
+      } catch { /* ignore */ }
+    }
+    fetchScheduled();
+  }, []);
+
+  // ---- Scheduled message CRUD ----
+  const handleSaveScheduled = async (msgs: SecretaryScheduledMessage[]) => {
+    setSavingScheduled(true);
+    try {
+      await fetch(`${API_BASE}/api/chat/home/secretary/scheduled-messages`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledMessages: msgs }),
+      });
+    } catch (err) {
+      console.error('[HomeChatPanel] Save scheduled failed:', err);
+    } finally {
+      setSavingScheduled(false);
+    }
+  };
+
+  const debouncedSaveScheduled = () => {
+    if (blurSaveTimer.current) clearTimeout(blurSaveTimer.current);
+    blurSaveTimer.current = setTimeout(() => {
+      handleSaveScheduled(scheduledMsgsRef.current);
+    }, 300);
+  };
+
+  const addScheduledMsg = () => {
+    const newMsg: SecretaryScheduledMessage = {
+      id: crypto.randomUUID(),
+      content: '',
+      scheduleType: 'interval',
+      intervalMinutes: 60,
+      aiReply: true,
+      enabled: false,
+    };
+    setScheduledMsgs([...scheduledMsgs, newMsg]);
+  };
+
+  const updateScheduledMsg = (id: string, partial: Partial<SecretaryScheduledMessage>) => {
+    setScheduledMsgs(prev => {
+      const next = prev.map(m => m.id === id ? { ...m, ...partial } : m);
+      // Auto-save for toggle changes
+      if ('enabled' in partial || 'aiReply' in partial || 'scheduleType' in partial) {
+        setTimeout(() => handleSaveScheduled(next), 0);
+      }
+      return next;
+    });
+  };
+
+  const removeScheduledMsg = (id: string) => {
+    if (blurSaveTimer.current) clearTimeout(blurSaveTimer.current);
+    const next = scheduledMsgs.filter(m => m.id !== id);
+    setScheduledMsgs(next);
+    handleSaveScheduled(next);
+  };
+
+  const handleTriggerScheduledMsg = async (msgId: string) => {
+    setTriggeringMsg(msgId);
+    try {
+      // Auto-save first
+      await fetch(`${API_BASE}/api/chat/home/secretary/scheduled-messages`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledMessages: scheduledMsgs }),
+      });
+      // Then trigger
+      const res = await fetch(`${API_BASE}/api/chat/home/secretary/scheduled-messages/trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: msgId }),
+      });
+      if (res.ok) {
+        toast.success('定时消息已触发');
+        // Refresh session to show new message
+        setTimeout(async () => {
+          try {
+            const r = await fetch(`${API_BASE}/api/chat/home/secretary?page=1&limit=${PAGE_SIZE}`);
+            const result = await r.json();
+            if (result.success && result.data?.messages) {
+              setMessages(result.data.messages);
+              setTimeout(() => scrollToBottom(), 100);
+            }
+          } catch { /* ignore */ }
+        }, 2000);
+      } else {
+        toast.error('触发失败');
+      }
+    } catch {
+      toast.error('触发失败');
+    } finally {
+      setTriggeringMsg(null);
+    }
+  };
 
   // ---- Load existing session on mount ----
   useEffect(() => {
@@ -965,6 +1178,21 @@ export default function HomeChatPanel({ onActionComplete }: HomeChatPanelProps) 
             }
             case 'dashboard_refresh': {
               if (onActionComplete) onActionComplete();
+              // 定时任务触发后，刷新消息列表
+              if (parsed.data?.reason === 'scheduled_message_triggered') {
+                fetch(`${API_BASE}/api/chat/home/secretary?page=1&limit=${PAGE_SIZE}`, {
+                  method: 'GET',
+                  headers: { 'Content-Type': 'application/json' },
+                })
+                  .then((r) => r.json())
+                  .then((result) => {
+                    if (result.success && result.data?.messages) {
+                      setMessages(result.data.messages);
+                      setTimeout(() => scrollToBottom(), 100);
+                    }
+                  })
+                  .catch(() => { /* ignore */ });
+              }
               break;
             }
             case 'connected': {
@@ -1801,6 +2029,161 @@ export default function HomeChatPanel({ onActionComplete }: HomeChatPanelProps) 
       {/* Floating input area */}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white/60 via-white/30 to-transparent dark:from-[#0f172a]/90 dark:via-[#0f172a]/60 dark:to-transparent pt-6 pb-6 px-4 lg:px-8 flex justify-center z-20">
         <div className="w-full max-w-3xl bg-white/50 dark:bg-slate-800/60 backdrop-blur-xl rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] border border-white/60 dark:border-border-subtle p-2 flex flex-col gap-2 relative">
+          {/* Scheduled messages panel */}
+          {showScheduledPanel && (
+            <div ref={scheduledPanelRef} className="px-3 pt-3 pb-1 border-b border-border-subtle/30 max-h-[50vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-primary/70" />
+                  <h3 className="text-[13px] font-semibold text-text-main">定时任务</h3>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={addScheduledMsg}
+                    className="p-1.5 rounded-lg text-text-secondary/50 hover:text-primary hover:bg-primary/5 transition-colors"
+                    title="添加定时任务"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setShowScheduledPanel(false)}
+                    className="p-1.5 rounded-lg text-text-secondary/50 hover:text-text-main hover:bg-bg-subtle transition-colors"
+                    title="关闭"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <p className="text-[11px] text-text-secondary/50 mb-3">设置定时发送给秘书的消息（支持AI回复）</p>
+
+              {scheduledMsgs.length === 0 ? (
+                <p className="text-[11px] text-text-secondary/40 text-center py-3">暂无定时任务，点击 + 添加</p>
+              ) : (
+                <div className="space-y-3">
+                  {scheduledMsgs.map((sm) => (
+                    <div key={sm.id} className="p-3 rounded-xl bg-bg-subtle/50 dark:bg-white/[0.03] border border-border-subtle/40 dark:border-white/[0.05] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={sm.enabled}
+                            onChange={(e) => updateScheduledMsg(sm.id, { enabled: e.target.checked })}
+                            className="w-4 h-4 rounded accent-primary"
+                          />
+                          <span className={`text-[12px] font-medium ${sm.enabled ? 'text-primary' : 'text-text-secondary/50'}`}>
+                            {sm.enabled ? '已启用' : '已禁用'}
+                          </span>
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <label className="flex items-center gap-1.5 cursor-pointer mr-2" title="AI回复">
+                            <Bot className={`w-3.5 h-3.5 ${sm.aiReply !== false ? 'text-primary' : 'text-text-secondary/30'}`} />
+                            <input
+                              type="checkbox"
+                              checked={sm.aiReply !== false}
+                              onChange={(e) => updateScheduledMsg(sm.id, { aiReply: e.target.checked })}
+                              className="w-3.5 h-3.5 rounded accent-primary"
+                            />
+                          </label>
+                          <button
+                            onClick={() => removeScheduledMsg(sm.id)}
+                            className="p-1 rounded-md text-text-secondary/40 hover:text-red-400 hover:bg-red-500/5 transition-all"
+                            title="删除"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <textarea
+                        value={sm.content}
+                        onChange={(e) => updateScheduledMsg(sm.id, { content: e.target.value })}
+                        onBlur={debouncedSaveScheduled}
+                        placeholder="输入定时发送给秘书的消息内容..."
+                        rows={2}
+                        className="w-full px-2.5 py-1.5 text-[12px] rounded-lg border border-border-subtle/40 dark:border-white/[0.04] bg-white/60 dark:bg-white/[0.02] text-text-main focus:outline-none focus:ring-1 focus:ring-primary/20 resize-none placeholder:text-text-secondary/30"
+                      />
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1 bg-bg-subtle/80 dark:bg-white/[0.03] rounded-lg p-0.5">
+                          <button
+                            onClick={() => updateScheduledMsg(sm.id, { scheduleType: 'interval' })}
+                            className={`px-2 py-0.5 text-[11px] rounded-md transition-all ${
+                              (sm.scheduleType || 'interval') === 'interval'
+                                ? 'bg-primary/15 text-primary font-medium'
+                                : 'text-text-secondary/50 hover:text-text-main'
+                            }`}
+                          >
+                            间隔
+                          </button>
+                          <button
+                            onClick={() => updateScheduledMsg(sm.id, { scheduleType: 'daily' })}
+                            className={`px-2 py-0.5 text-[11px] rounded-md transition-all ${
+                              sm.scheduleType === 'daily'
+                                ? 'bg-primary/15 text-primary font-medium'
+                                : 'text-text-secondary/50 hover:text-text-main'
+                            }`}
+                          >
+                            定时
+                          </button>
+                        </div>
+                        {(sm.scheduleType || 'interval') === 'interval' ? (
+                          <>
+                            <span className="text-[11px] text-text-secondary/50 shrink-0">每隔</span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={sm.intervalMinutes}
+                              onChange={(e) => updateScheduledMsg(sm.id, { intervalMinutes: Math.max(1, parseInt(e.target.value) || 1) })}
+                              onBlur={debouncedSaveScheduled}
+                              className="w-16 px-2 py-1 text-[12px] text-center rounded-lg border border-border-subtle/40 dark:border-white/[0.04] bg-white/60 dark:bg-white/[0.02] text-text-main focus:outline-none focus:ring-1 focus:ring-primary/20"
+                            />
+                            <span className="text-[11px] text-text-secondary/50">分钟</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-[11px] text-text-secondary/50 shrink-0">每天</span>
+                            <input
+                              type="time"
+                              value={sm.scheduledTime || '09:00'}
+                              onChange={(e) => updateScheduledMsg(sm.id, { scheduledTime: e.target.value })}
+                              onBlur={debouncedSaveScheduled}
+                              className="px-2 py-1 text-[12px] rounded-lg border border-border-subtle/40 dark:border-white/[0.04] bg-white/60 dark:bg-white/[0.02] text-text-main focus:outline-none focus:ring-1 focus:ring-primary/20"
+                            />
+                            <span className="text-[11px] text-text-secondary/50">执行</span>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between">
+                        {sm.lastSentAt ? (
+                          <p className="text-[10px] text-text-secondary/40">上次发送: {new Date(sm.lastSentAt).toLocaleString('zh-CN')}</p>
+                        ) : (
+                          <p className="text-[10px] text-text-secondary/40">尚未发送</p>
+                        )}
+                        <button
+                          onClick={() => handleTriggerScheduledMsg(sm.id)}
+                          disabled={triggeringMsg === sm.id || !sm.content.trim()}
+                          className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-primary/80 hover:text-primary hover:bg-primary/5 rounded-lg transition-all disabled:opacity-40"
+                          title="立即执行"
+                        >
+                          <Play className="w-3 h-3" />
+                          {triggeringMsg === sm.id ? '发送中...' : '立即执行'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {scheduledMsgs.length > 0 && (
+                <button
+                  onClick={() => handleSaveScheduled(scheduledMsgs)}
+                  disabled={savingScheduled}
+                  className="mt-3 mb-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] font-medium text-primary hover:bg-primary/5 rounded-xl transition-all disabled:opacity-40 border border-primary/20"
+                >
+                  <Save className="w-4 h-4" />
+                  {savingScheduled ? '保存中...' : '保存定时配置'}
+                </button>
+              )}
+            </div>
+          )}
           {/* @Mention dropdown */}
           {mention.active && (employees.length > 0 || lanPeers.length > 0) && (
             <PeerMentionMenu
@@ -1862,8 +2245,26 @@ export default function HomeChatPanel({ onActionComplete }: HomeChatPanelProps) 
               <button type="button" onClick={handleFileSelect} className="p-2 text-text-secondary hover:text-primary hover:bg-bg-subtle rounded-lg transition-colors" title="添加附件">
                 <Paperclip className="w-5 h-5" />
               </button>
-              <button type="button" className="p-2 text-text-secondary hover:text-primary hover:bg-bg-subtle rounded-lg transition-colors" title="语音输入">
-                <Mic className="w-5 h-5" />
+              <button
+                type="button"
+                onClick={toggleVoiceInput}
+                disabled={!voiceSupported}
+                className={`p-2 rounded-lg transition-colors ${
+                  isListening
+                    ? 'text-red-500 bg-red-500/10 animate-pulse'
+                    : 'text-text-secondary hover:text-primary hover:bg-bg-subtle'
+                } disabled:opacity-30 disabled:cursor-not-allowed`}
+                title={isListening ? '停止语音输入' : '语音输入'}
+              >
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowScheduledPanel(!showScheduledPanel)}
+                className={`p-2 rounded-lg transition-colors ${showScheduledPanel ? 'text-primary bg-primary/10' : 'text-text-secondary hover:text-primary hover:bg-bg-subtle'}`}
+                title="定时任务"
+              >
+                <Clock className="w-5 h-5" />
               </button>
               <div className="h-4 w-px bg-border-subtle mx-1" />
               <button type="button" className="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-text-secondary hover:text-text-main hover:bg-bg-subtle rounded-lg transition-colors">

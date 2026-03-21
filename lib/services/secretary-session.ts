@@ -53,6 +53,18 @@ export interface SecretaryMessage {
   attachments?: SecretaryAttachment[];
 }
 
+/** 秘书定时消息配置 */
+export interface SecretaryScheduledMessage {
+  id: string;
+  content: string;
+  scheduleType: 'interval' | 'daily';
+  intervalMinutes: number;
+  scheduledTime?: string;    // HH:MM format for daily mode
+  aiReply: boolean;          // whether AI should process the message
+  enabled: boolean;
+  lastSentAt?: number;       // epoch ms
+}
+
 export interface SecretarySession {
   id: string;
   messages: SecretaryMessage[];
@@ -66,6 +78,8 @@ export interface SecretarySession {
     toDate: string;
     updatedAt: string;
   };
+  /** 定时消息配置列表 */
+  scheduledMessages?: SecretaryScheduledMessage[];
 }
 
 // ========== Internal Helpers ==========
@@ -82,6 +96,11 @@ function getSessionDir(): string {
 
 function getSessionFilePath(): string {
   return path.join(getSessionDir(), 'secretary-session.json');
+}
+
+/** 定时消息使用独立文件，避免与会话文件的并发写冲突 */
+function getScheduledMessagesFilePath(): string {
+  return path.join(getSessionDir(), 'secretary-scheduled-messages.json');
 }
 
 /**
@@ -180,4 +199,43 @@ export async function clearSession(): Promise<void> {
     }
     throw error;
   }
+}
+
+/**
+ * Load scheduled messages from independent file.
+ * Uses a separate file from session to avoid race conditions
+ * between scheduler writes and session writes.
+ */
+export async function loadScheduledMessages(): Promise<SecretaryScheduledMessage[]> {
+  const filePath = getScheduledMessagesFilePath();
+  try {
+    const raw = await fs.readFile(filePath, 'utf-8');
+    if (!raw.trim()) throw new Error('empty file');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    return [];
+  } catch {
+    // File missing, empty, or corrupt — try to migrate from session file
+    try {
+      const session = await loadSession();
+      if (session.scheduledMessages && session.scheduledMessages.length > 0) {
+        const migrated = session.scheduledMessages;
+        await saveScheduledMessages(migrated);
+        console.log(`[SecretarySession] Migrated ${migrated.length} scheduled messages to independent file`);
+        return migrated;
+      }
+    } catch { /* ignore migration errors */ }
+    return [];
+  }
+}
+
+/**
+ * Save scheduled messages to independent file.
+ * Never touches the session file — no race condition risk.
+ */
+export async function saveScheduledMessages(messages: SecretaryScheduledMessage[]): Promise<void> {
+  const filePath = getScheduledMessagesFilePath();
+  const dir = getSessionDir();
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(messages, null, 2), 'utf-8');
 }

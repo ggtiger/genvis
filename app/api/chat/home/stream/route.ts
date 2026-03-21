@@ -14,6 +14,7 @@ import { NextRequest } from 'next/server';
 import { secretaryStream } from '@/lib/services/secretary-stream';
 import { MemoryScheduler } from '@/lib/services/memory-scheduler';
 import { loadMemory } from '@/lib/services/secretary-memory';
+import { startSecretaryScheduler, isSecretarySchedulerRunning } from '@/lib/services/secretary-scheduler';
 
 // Singleton MemoryScheduler (stable across HMR)
 const g = globalThis as unknown as { __memory_scheduler__?: MemoryScheduler };
@@ -56,6 +57,11 @@ export async function GET(request: NextRequest) {
         memoryScheduler.start().catch(err =>
           console.warn('[Stream] Failed to start memory scheduler:', err),
         );
+      }
+
+      // Start secretary scheduled message scheduler
+      if (!isSecretarySchedulerRunning()) {
+        startSecretaryScheduler();
       }
 
       // Flush any buffered reminders to this new connection
