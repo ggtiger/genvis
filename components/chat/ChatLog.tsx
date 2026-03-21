@@ -1367,6 +1367,7 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
   }, []);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [totalMessageCount, setTotalMessageCount] = useState(0);
+  const oldestLoadedOffsetRef = useRef(0);
 
   // Enhanced deduplication system to prevent duplicate messages
   const processedMessageIds = useRef(new Set<string>());
@@ -2431,7 +2432,7 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
 
       try {
         // Load more messages per request to reduce pagination needs
-        const response = await fetch(`${API_BASE}/api/chat/${projectId}/messages?limit=200&offset=0`);
+        const response = await fetch(`${API_BASE}/api/chat/${projectId}/messages?limit=200&offset=0&latest=true`);
         if (response.ok) {
           didSucceed = true;
           const payload = await response.json();
@@ -2444,8 +2445,9 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
 
           // Update pagination state
           if (payload.pagination) {
-            
-            setHasMoreMessages(payload.pagination.hasMore || false);
+            const actualOffset = payload.pagination.offset ?? 0;
+            oldestLoadedOffsetRef.current = actualOffset;
+            setHasMoreMessages(actualOffset > 0);
             setTotalMessageCount(payload.totalCount || 0);
           } else {
             setHasMoreMessages(false);
@@ -2566,13 +2568,17 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
     return () => clearTimeout(timer);
   }, [needsHistoryRefresh, loadChatHistory]);
 
-  // Load older messages (pagination)
+  // Load older messages (pagination) — loads messages BEFORE the current oldest
   const loadOlderMessages = useCallback(async () => {
     if (!projectId || !hasMoreMessages) return;
 
     try {
-      const currentOffset = messages.length;
-      const response = await fetch(`${API_BASE}/api/chat/${projectId}/messages?limit=100&offset=${currentOffset}`);
+      const batchSize = 100;
+      const newOffset = Math.max(0, oldestLoadedOffsetRef.current - batchSize);
+      const actualLimit = oldestLoadedOffsetRef.current - newOffset; // may be < batchSize near the start
+      if (actualLimit <= 0) return;
+
+      const response = await fetch(`${API_BASE}/api/chat/${projectId}/messages?limit=${actualLimit}&offset=${newOffset}`);
 
       if (response.ok) {
         const payload = await response.json();
@@ -2584,13 +2590,11 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
           : [];
 
         // Update pagination state
-        if (payload.pagination) {
-          setHasMoreMessages(payload.pagination.hasMore || false);
-          setTotalMessageCount(payload.totalCount || 0);
-          
-        }
+        oldestLoadedOffsetRef.current = newOffset;
+        setHasMoreMessages(newOffset > 0);
+        if (payload.totalCount) setTotalMessageCount(payload.totalCount);
 
-        // Prepend older messages to the existing list
+        // Prepend older messages
         if (normalized.length > 0) {
           setMessages((prev) => integrateMessages(prev, normalized));
         }
@@ -2598,7 +2602,19 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
     } catch (error) {
       console.error('[ChatLog] Failed to load older messages:', error);
     }
-  }, [projectId, hasMoreMessages, messages.length, ensureStableMessageId]);
+  }, [projectId, hasMoreMessages, ensureStableMessageId]);
+
+  const isLoadingOlderRef = useRef(false);
+  const loadOlderMessagesGuarded = useCallback(async () => {
+    if (isLoadingOlderRef.current) return;
+    isLoadingOlderRef.current = true;
+    try {
+      await loadOlderMessages();
+    } finally {
+      // small cooldown to prevent rapid re-triggers from scroll events
+      setTimeout(() => { isLoadingOlderRef.current = false; }, 500);
+    }
+  }, [loadOlderMessages]);
 
   // Poll session status periodically
   const startSessionPolling = useCallback(
@@ -3434,7 +3450,15 @@ const ToolResultMessage = ({
       )}
 
       {/* Display messages and logs together */}
-      <div className="flex-1 overflow-y-auto px-8 py-3 space-y-2 custom-scrollbar ">
+      <div
+        className="flex-1 overflow-y-auto px-8 py-3 space-y-2 custom-scrollbar "
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          if (el.scrollTop < 80 && hasMoreMessages && !isLoading) {
+            loadOlderMessagesGuarded();
+          }
+        }}
+      >
         {isLoading && !hasLoadedOnce && !hasError && (
           <div className="flex items-center justify-center h-32 text-slate-400 dark:text-slate-500 text-sm">
             <div className="flex flex-col items-center">
@@ -3457,7 +3481,7 @@ const ToolResultMessage = ({
         {hasMoreMessages && (
           <div className="mb-4 flex justify-center">
             <button
-              onClick={loadOlderMessages}
+              onClick={loadOlderMessagesGuarded}
               className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 bg-white/30 dark:bg-white/10 hover:bg-white/40 dark:hover:bg-white/15 rounded-md transition-colors"
               disabled={isLoading}
             >

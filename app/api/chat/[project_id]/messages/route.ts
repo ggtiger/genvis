@@ -24,12 +24,16 @@ export async function GET(
     const { project_id } = await params;
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit') || '50');
-    const offset = parseInt(searchParams.get('offset') || '0');
+    let offset = parseInt(searchParams.get('offset') || '0');
+    const latest = searchParams.get('latest') === 'true';
 
-    const [messages, totalCount] = await Promise.all([
-      getMessagesByProjectId(project_id, limit, offset),
-      getMessagesCountByProjectId(project_id),
-    ]);
+    // When latest=true, auto-calculate offset to fetch the newest messages
+    const totalCount = await getMessagesCountByProjectId(project_id);
+    if (latest && offset === 0) {
+      offset = Math.max(0, totalCount - limit);
+    }
+
+    const messages = await getMessagesByProjectId(project_id, limit, offset);
     const serialized = serializeMessages(messages);
 
     const res = NextResponse.json({
