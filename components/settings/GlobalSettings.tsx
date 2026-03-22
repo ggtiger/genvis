@@ -18,6 +18,7 @@ const AppearanceTab = lazy(() => import('./tabs/AppearanceTab'));
 const ASRTab = lazy(() => import('./tabs/ASRTab'));
 const BasicTab = lazy(() => import('./tabs/BasicTab'));
 const ServicesTab = lazy(() => import('./tabs/ServicesTab'));
+const AboutTab = lazy(() => import('./tabs/AboutTab'));
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '';
 
@@ -106,7 +107,7 @@ const CLI_OPTIONS: CLIOption[] = [
 
 // Global settings are provided by context
 
-type SettingsTabId = 'general' | 'ai-agents' | 'asr' | 'services' | 'basic' | 'memory' | 'soul' | 'skills' | 'im-channels' | 'lan-peer' | 'appearance';
+type SettingsTabId = 'general' | 'ai-agents' | 'asr' | 'services' | 'basic' | 'memory' | 'soul' | 'skills' | 'im-channels' | 'lan-peer' | 'appearance' | 'about';
 
 /** Tab configuration - defined outside component to avoid recreation on each render */
 const SETTINGS_TABS: { id: SettingsTabId; label: string; icon: React.ReactNode }[] = [
@@ -120,6 +121,7 @@ const SETTINGS_TABS: { id: SettingsTabId; label: string; icon: React.ReactNode }
   { id: 'memory', label: '记忆管理', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> },
   { id: 'soul', label: '灵魂设定', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> },
   { id: 'basic', label: 'Basic', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg> },
+  { id: 'about', label: '关于', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> },
 ];
 
 /** Memoized child components to prevent re-render on tab switch */
@@ -826,6 +828,14 @@ export default function GlobalSettings({ isOpen, onClose, initialTab = 'ai-agent
             <div style={{ display: activeTab === 'lan-peer' ? undefined : 'none' }}>
             {visitedTabs.has('lan-peer') && (
               <MemoizedLanPeerSettings />
+            )}
+            </div>
+
+            <div style={{ display: activeTab === 'about' ? undefined : 'none' }}>
+            {visitedTabs.has('about') && (
+              <Suspense fallback={<div className="flex items-center justify-center py-8 text-sm text-gray-400">Loading...</div>}>
+                <AboutTab />
+              </Suspense>
             )}
             </div>
           </div>

@@ -180,7 +180,7 @@ function getGitFileNameClass(status?: GitFileStatus): string {
 }
 
 // Context menu component with viewport-aware positioning
-export function ContextMenu({ x, y, file, onClose, onRename, onDelete, onCopy, onMove, containerRef, onNewFile, onNewFolder, onUpload, onAddToContext, onDownload, onGitStage, onGitDiff, onGitLog }: {
+export function ContextMenu({ x, y, file, onClose, onRename, onDelete, onCopy, onMove, containerRef, onNewFile, onNewFolder, onUpload, onAddToContext, onDownload, onGitStage, onGitDiff, onGitLog, readOnly }: {
   x: number; y: number; file: FileItem;
   onClose: () => void; onRename: () => void; onDelete: () => void;
   onCopy: () => void; onMove: () => void;
@@ -193,6 +193,7 @@ export function ContextMenu({ x, y, file, onClose, onRename, onDelete, onCopy, o
   onGitStage?: (file: FileItem, action: 'stage' | 'restore' | 'restore-staged') => void;
   onGitDiff?: (file: FileItem, from?: string, to?: string) => void;
   onGitLog?: (file?: FileItem) => void;
+  readOnly?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
@@ -244,22 +245,24 @@ export function ContextMenu({ x, y, file, onClose, onRename, onDelete, onCopy, o
   const items: { icon: React.ReactElement; label: string; action: () => void; danger?: boolean; separator?: boolean }[] = [];
 
   // Folder-specific: new file / new subfolder
-  if (isDir && onNewFile) {
+  if (!readOnly && isDir && onNewFile) {
     items.push({ icon: <FilePlus size={14} />, label: '新建文件', action: onNewFile });
   }
-  if (isDir && onNewFolder) {
+  if (!readOnly && isDir && onNewFolder) {
     items.push({ icon: <FolderPlus size={14} />, label: '新建子文件夹', action: onNewFolder });
   }
-  if (isDir && onUpload) {
+  if (!readOnly && isDir && onUpload) {
     items.push({ icon: <Upload size={14} />, label: '上传文件到此', action: onUpload, separator: true });
   }
 
-  // Common actions
-  items.push(
-    { icon: <Pencil size={14} />, label: '重命名', action: onRename },
-    { icon: <Copy size={14} />, label: '复制', action: onCopy },
-    { icon: <Move size={14} />, label: '移动到...', action: onMove },
-  );
+  // Common actions (hidden in readOnly mode)
+  if (!readOnly) {
+    items.push(
+      { icon: <Pencil size={14} />, label: '重命名', action: onRename },
+      { icon: <Copy size={14} />, label: '复制', action: onCopy },
+      { icon: <Move size={14} />, label: '移动到...', action: onMove },
+    );
+  }
   if (!isDir && onDownload) {
     items.push({ icon: <Download size={14} className="text-blue-500" />, label: '下载', action: onDownload });
   }
@@ -320,9 +323,11 @@ export function ContextMenu({ x, y, file, onClose, onRename, onDelete, onCopy, o
     }
   }
 
-  items.push(
-    { icon: <Trash2 size={14} className="text-red-500" />, label: '删除', action: onDelete, danger: true },
-  );
+  if (!readOnly) {
+    items.push(
+      { icon: <Trash2 size={14} className="text-red-500" />, label: '删除', action: onDelete, danger: true },
+    );
+  }
 
   return (
     <div
@@ -592,7 +597,7 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
   return (
     <div
       ref={containerRef}
-      className={`relative h-full ${isDragOver ? 'ring-2 ring-blue-400 ring-inset bg-blue-50/30 dark:bg-blue-900/10' : ''}`}
+      className={`relative h-full flex flex-col ${isDragOver ? 'ring-2 ring-blue-400 ring-inset bg-blue-50/30 dark:bg-blue-900/10' : ''}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -801,6 +806,22 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
             }).catch(() => {});
             setContextMenu(null);
           } : undefined}
+        />
+      )}
+      {/* Read-only mode: show context menu with download only */}
+      {contextMenu && readOnly && onDownload && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          file={contextMenu.file}
+          containerRef={containerRef}
+          readOnly
+          onClose={() => setContextMenu(null)}
+          onRename={() => {}}
+          onDelete={() => {}}
+          onCopy={() => {}}
+          onMove={() => {}}
+          onDownload={contextMenu.file.type !== 'directory' ? () => { onDownload(contextMenu.file); setContextMenu(null); } : undefined}
         />
       )}
 

@@ -190,10 +190,14 @@ export class LanPeerManager {
 
           lanPeerStream.publish({ type: 'new_message', data: { message: chatMsg } });
 
+          // Touch group timestamp for sorting
+          const { touchGroupTimestamp } = await import('./chat-service');
+          touchGroupTimestamp(chatMsg.groupId).catch(() => {});
+
           // If this node is the group creator and the message is a user text message,
           // trigger AI reply on behalf of the remote sender.
+          // skill_invoke mode also triggers AI — skills are loaded as SDK plugins.
           if (chatMsg.senderId !== 'ai-assistant' && chatMsg.messageType === 'text'
-              && chatMsg.interactionMode !== 'skill_invoke'
               && chatMsg.interactionMode !== 'no_ai') {
             const group = await getGroup(chatMsg.groupId);
             if (group?.creatorId === this.peerId) {

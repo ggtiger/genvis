@@ -16,6 +16,8 @@ export async function GET() {
     const groups = allGroups.filter(g =>
       g.members.includes(localPeerId) || g.creatorId === localPeerId || g.creatorId === 'local'
     );
+    // Sort by updatedAt descending (most recent first)
+    groups.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     return NextResponse.json({ success: true, data: groups });
   } catch (error) {
     return NextResponse.json({ success: false, error: '获取群组列表失败' }, { status: 500 });

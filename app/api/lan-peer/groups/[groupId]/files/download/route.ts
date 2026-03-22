@@ -11,6 +11,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getGroup } from '@/lib/services/lan-peer/chat-service';
 import { getLanPeerManager } from '@/lib/services/lan-peer/manager';
+import { resolveGroupProxyUrl } from '@/lib/services/lan-peer/group-file-proxy';
 
 interface RouteContext {
   params: Promise<{ groupId: string }>;
@@ -70,18 +71,12 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     const manager = getLanPeerManager();
     const localPeerId = manager?.peerId || (globalThis as any).__lan_peer_id__ || 'local';
 
-    // Determine if this node owns the workspace
-    const workspace = groupWorkspace(groupId);
-    let isLocalCreator = group.creatorId === localPeerId || group.creatorId === 'local';
-    if (!isLocalCreator) {
-      try {
-        const wsStat = await fs.stat(workspace);
-        if (wsStat.isDirectory()) isLocalCreator = true;
-      } catch { /* doesn't exist locally */ }
-    }
+    // Determine if this node is the creator — exact peerId match
+    const isLocalCreator = group.creatorId === localPeerId || group.creatorId === 'local';
 
     // Local creator — serve file directly
     if (isLocalCreator) {
+      const workspace = groupWorkspace(groupId);
       const absPath = safePath(workspace, filePath);
 
       const stat = await fs.stat(absPath);
@@ -104,21 +99,16 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       });
     }
 
-    // Proxy to creator
-    if (!manager) {
-      return NextResponse.json({ success: false, error: '局域网聊天服务未启动' }, { status: 503 });
-    }
-
-    const peers = manager.discovery.getRegistry().getPeers();
-    const creator = peers.find((p) => p.id === group.creatorId);
-    if (!creator || creator.status !== 'online') {
+    // Non-creator: proxy to creator using resolveGroupProxyUrl
+    const proxyBaseUrl = await resolveGroupProxyUrl(groupId);
+    if (!proxyBaseUrl) {
       return NextResponse.json({
         success: false,
         error: '群组创建者不在线，无法下载文件',
       }, { status: 503 });
     }
 
-    const proxyUrl = `http://${creator.ip}:${creator.httpPort}/api/lan-peer/groups/${groupId}/files/download?path=${encodeURIComponent(filePath)}`;
+    const proxyUrl = `${proxyBaseUrl}/api/lan-peer/groups/${groupId}/files/download?path=${encodeURIComponent(filePath)}`;
     const proxyRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(30000) });
 
     if (!proxyRes.ok) {

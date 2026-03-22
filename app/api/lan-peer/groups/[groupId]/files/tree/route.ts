@@ -11,6 +11,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getGroup } from '@/lib/services/lan-peer/chat-service';
 import { getLanPeerManager } from '@/lib/services/lan-peer/manager';
+import { resolveGroupProxyUrl } from '@/lib/services/lan-peer/group-file-proxy';
 
 interface RouteContext {
   params: Promise<{ groupId: string }>;
@@ -49,21 +50,13 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     const manager = getLanPeerManager();
     const localPeerId = manager?.peerId || (globalThis as any).__lan_peer_id__ || 'local';
 
-    // Determine if this node owns the workspace.
-    // Primary check: creatorId matches current peerId.
-    // Fallback: workspace directory exists locally (handles peerId change after restart).
-    const workspace = groupWorkspace(groupId);
-    let isLocalCreator = group.creatorId === localPeerId || group.creatorId === 'local';
-    if (!isLocalCreator) {
-      try {
-        const wsStat = await fs.stat(workspace);
-        if (wsStat.isDirectory()) isLocalCreator = true;
-      } catch { /* doesn't exist locally */ }
-    }
+    // Determine if this node is the creator — exact peerId match
+    const isLocalCreator = group.creatorId === localPeerId || group.creatorId === 'local';
 
     // If we are the creator, read local workspace
     if (isLocalCreator) {
       // Ensure workspace exists
+      const workspace = groupWorkspace(groupId);
       await fs.mkdir(workspace, { recursive: true });
 
       const targetDir = safePath(workspace, dir);
@@ -123,20 +116,15 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     }
 
     // Not the creator — proxy to creator's node
-    if (!manager) {
-      return NextResponse.json({ success: false, error: '局域网聊天服务未启动' }, { status: 503 });
-    }
-
-    const peers = manager.discovery.getRegistry().getPeers();
-    const creator = peers.find((p) => p.id === group.creatorId);
-    if (!creator || creator.status !== 'online') {
+    const proxyBaseUrl = await resolveGroupProxyUrl(groupId);
+    if (!proxyBaseUrl) {
       return NextResponse.json({
         success: false,
         error: '群组创建者不在线，无法浏览文件',
       }, { status: 503 });
     }
 
-    const proxyUrl = `http://${creator.ip}:${creator.httpPort}/api/lan-peer/groups/${groupId}/files/tree?dir=${encodeURIComponent(dir)}`;
+    const proxyUrl = `${proxyBaseUrl}/api/lan-peer/groups/${groupId}/files/tree?dir=${encodeURIComponent(dir)}`;
     const proxyRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
     const proxyData = await proxyRes.json();
     return NextResponse.json(proxyData);

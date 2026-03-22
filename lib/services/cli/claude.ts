@@ -2387,11 +2387,20 @@ ${tail}`;
         } else if (/permission|EACCES|EPERM|denied/i.test(tail) && !/No conversation found/i.test(tail)) {
           errorMessage = `Execution interrupted due to file access permission error. Please check project directory permissions.\n\nDetailed log:\n${tail}`;
         } else if (/No conversation found|session.*not found/i.test(tail)) {
-          // Session file not found - clear invalid session ID so next request starts fresh
+          // Session file not found - clear invalid session ID and auto-retry
           try {
             await updateProject(projectId, { activeClaudeSessionId: null });
-            console.log(`[ClaudeService] Cleared invalid session ID for project: ${projectId}`);
+            console.log(`[ClaudeService] Cleared invalid session ID for project: ${projectId}, auto-retrying...`);
           } catch {}
+          if (sessionId) {
+            // Auto-retry without session — user doesn't need to resend
+            try {
+              await executeClaude(projectId, projectPath, instruction, model, undefined, requestId);
+              return; // Retry succeeded
+            } catch (retryErr) {
+              console.error(`[ClaudeService] Retry also failed:`, retryErr);
+            }
+          }
           errorMessage = `会话记录不存在，已自动清理。请重新发送消息。\n\nDetailed log:\n${tail}`;
         } else if (/model|unsupported|invalid\s+model/i.test(tail)) {
           errorMessage = `There is a problem with the model settings. Please try changing the model.\n\nDetailed log:\n${tail}`;

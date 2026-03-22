@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import PeerStatusBar from './PeerStatusBar';
 import GroupList from './GroupList';
 import GroupChatPanel from './GroupChatPanel';
@@ -37,9 +37,22 @@ export default function LanChatLayout() {
     try {
       const res = await fetch(`${API_BASE}/api/lan-peer/groups`);
       const data = await res.json();
-      if (data.success) setGroups(data.data || []);
+      if (data.success) {
+        const sorted: ChatGroup[] = data.data || [];
+        // API already sorts by updatedAt desc; keep consistent
+        setGroups(sorted);
+      }
     } catch { /* ignore */ }
   }, []);
+
+  // Auto-select first (most recent) group on initial load
+  const initialSelectDone = useRef(false);
+  useEffect(() => {
+    if (!initialSelectDone.current && groups.length > 0 && !selectedGroupId) {
+      setSelectedGroupId(groups[0].id);
+      initialSelectDone.current = true;
+    }
+  }, [groups, selectedGroupId]);
 
   useEffect(() => {
     loadPeers();
@@ -67,6 +80,21 @@ export default function LanChatLayout() {
           case 'group_updated':
             loadGroups();
             break;
+          case 'new_message': {
+            // Bump the group with new message to top of list
+            const msgGroupId = (data.data?.message as any)?.groupId;
+            if (msgGroupId) {
+              setGroups((prev) => {
+                const idx = prev.findIndex(g => g.id === msgGroupId);
+                if (idx <= 0) return prev; // already first or not found
+                const updated = [...prev];
+                const [group] = updated.splice(idx, 1);
+                updated.unshift(group);
+                return updated;
+              });
+            }
+            break;
+          }
           case 'group_deleted': {
             const deletedId = data.data?.groupId;
             if (deletedId) {

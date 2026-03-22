@@ -57,6 +57,26 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
   const [showAddMember, setShowAddMember] = useState(false);
   const [groupMembers, setGroupMembers] = useState<string[]>(group.members);
   const [savingMembers, setSavingMembers] = useState(false);
+  const [allSkills, setAllSkills] = useState<{ name: string; displayName?: string; enabled: boolean }[]>([]);
+  const [editingSkills, setEditingSkills] = useState<string[]>(group.enabledSkills || []);
+  const [savingSkills, setSavingSkills] = useState(false);
+
+  const fetchAllSkills = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/skills`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setAllSkills(json.data);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Sync editingSkills when group prop changes (e.g. via SSE)
+  useEffect(() => {
+    setEditingSkills(group.enabledSkills || []);
+  }, [group.enabledSkills]);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -72,15 +92,24 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewFileName, setPreviewFileName] = useState<string>('');
 
+  const [fileError, setFileError] = useState<string | null>(null);
+
   const loadTree = useCallback(async (dir = '.') => {
     try {
+      setFileError(null);
       const res = await fetch(`${API_BASE}/api/repo/${group.id}/tree?dir=${encodeURIComponent(dir)}`);
       if (res.ok) {
         const data = await res.json();
         setTree(data || []);
         setCurrentPath(dir);
+      } else {
+        setTree([]);
+        setFileError('无法加载文件列表，群主可能不在线或未开启远程访问');
       }
-    } catch { /* ignore */ }
+    } catch {
+      setTree([]);
+      setFileError('无法加载文件列表，群主可能不在线或未开启远程访问');
+    }
   }, [group.id]);
 
   const loadTreeRef = useRef(loadTree);
@@ -623,8 +652,9 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
   // Available peers to add (online, not already in group)
   const availablePeers = peers.filter(p => p.status === 'online' && !groupMembers.includes(p.id));
 
-  // Permission: is current user the group creator?
-  const isGroupCreator = localPeerId === group.creatorId || group.creatorId === 'local';
+  // Permission: is current user the group creator? Exact peerId match
+  // (same machine with different ports = different instances, must NOT match)
+  const isGroupCreator = group.creatorId === 'local' || localPeerId === group.creatorId;
 
   return (
     <div className="flex-1 flex flex-col h-full relative">
@@ -655,7 +685,7 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
             <FolderOpen className="w-4.5 h-4.5" />
           </button>
           <button
-            onClick={() => { setShowDetail(!showDetail); if (!showDetail) setShowFiles(false); }}
+            onClick={() => { setShowDetail(!showDetail); if (!showDetail) { setShowFiles(false); fetchAllSkills(); } }}
             className={`p-2 rounded-xl transition-all ${
               showDetail
                 ? 'bg-primary/10 text-primary'
@@ -747,23 +777,36 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
               </button>
             </div>
             <div className="flex-1 overflow-hidden">
-              <FileGridView
-                files={tree.map(entry => ({
-                  name: entry.path.split('/').pop() || entry.path,
-                  path: entry.path,
-                  type: entry.type === 'dir' ? 'directory' as const : 'file' as const,
-                  size: entry.size,
-                  extension: entry.path.split('.').pop(),
-                }))}
-                projectId={group.id}
-                currentDir={currentPath}
-                compact
-                readOnly={!isGroupCreator}
-                onFileClick={handleFileClick}
-                onFolderClick={(folder) => loadTree(folder.path)}
-                onRefresh={() => loadTreeRef.current?.('.')}
-                onDownload={handleDownloadFile}
-              />
+              {fileError && tree.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-text-secondary/60 gap-2 px-6">
+                  <FolderOpen className="w-10 h-10 opacity-30" />
+                  <p className="text-[13px] text-center">{fileError}</p>
+                  <button
+                    onClick={() => loadTree('.')}
+                    className="mt-2 text-[12px] text-primary hover:underline"
+                  >
+                    重试
+                  </button>
+                </div>
+              ) : (
+                <FileGridView
+                  files={tree.map(entry => ({
+                    name: entry.path.split('/').pop() || entry.path,
+                    path: entry.path,
+                    type: entry.type === 'dir' ? 'directory' as const : 'file' as const,
+                    size: entry.size,
+                    extension: entry.path.split('.').pop(),
+                  }))}
+                  projectId={group.id}
+                  currentDir={currentPath}
+                  compact
+                  readOnly={!isGroupCreator}
+                  onFileClick={handleFileClick}
+                  onFolderClick={(folder) => loadTree(folder.path)}
+                  onRefresh={() => loadTreeRef.current?.('.')}
+                  onDownload={handleDownloadFile}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -911,19 +954,70 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
               </div>
 
               {/* Skills section */}
-              {group.enabledSkills.length > 0 && (
-                <div>
-                  <h3 className="text-[13px] font-semibold text-text-main mb-2">开放技能</h3>
-                  <div className="space-y-1">
-                    {group.enabledSkills.map((skill) => (
-                      <div key={skill} className="flex items-center gap-2 text-[13px] px-3 py-2 bg-primary/5 hover:bg-primary/8 rounded-xl text-primary/80 transition-colors">
-                        <Zap className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">{skill}</span>
-                      </div>
-                    ))}
+              <div>
+                <h3 className="text-[13px] font-semibold text-text-main mb-1">开放技能</h3>
+                <p className="text-[11px] text-text-secondary/50 mb-2.5">{isGroupCreator ? '选择群聊可用的技能插件' : '由群主设置'}</p>
+                {allSkills.length === 0 && editingSkills.length === 0 ? (
+                  <p className="text-[11px] text-text-secondary/40 text-center py-3">暂无可用技能</p>
+                ) : (
+                  <div className="space-y-1 max-h-[200px] overflow-y-auto">
+                    {(isGroupCreator ? allSkills : allSkills.filter(s => editingSkills.includes(s.name))).map((skill) => {
+                      const isEnabled = editingSkills.includes(skill.name);
+                      return (
+                        <div
+                          key={skill.name}
+                          onClick={() => {
+                            if (!isGroupCreator) return;
+                            setEditingSkills(prev =>
+                              prev.includes(skill.name)
+                                ? prev.filter(s => s !== skill.name)
+                                : [...prev, skill.name]
+                            );
+                          }}
+                          className={`flex items-center gap-2 text-[13px] px-3 py-2 rounded-xl transition-colors ${
+                            isEnabled
+                              ? 'bg-primary/10 text-primary border border-primary/20'
+                              : 'bg-white/10 dark:bg-white/[0.03] text-text-secondary/60 border border-transparent'
+                          } ${isGroupCreator ? 'cursor-pointer hover:bg-primary/15' : 'cursor-default'}`}
+                        >
+                          <Zap className={`w-3.5 h-3.5 shrink-0 ${isEnabled ? 'text-primary' : 'text-text-secondary/40'}`} />
+                          <span className="truncate flex-1">{skill.displayName || skill.name}</span>
+                          {isGroupCreator && (
+                            <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center transition-colors ${
+                              isEnabled ? 'bg-primary border-primary' : 'border-text-secondary/30'
+                            }`}>
+                              {isEnabled && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {!isGroupCreator && editingSkills.length === 0 && (
+                      <p className="text-[11px] text-text-secondary/40 text-center py-3">群主未开放技能</p>
+                    )}
                   </div>
-                </div>
-              )}
+                )}
+                {isGroupCreator && (
+                  <button
+                    onClick={async () => {
+                      setSavingSkills(true);
+                      try {
+                        await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ enabledSkills: editingSkills }),
+                        });
+                      } catch { /* ignore */ }
+                      setSavingSkills(false);
+                    }}
+                    disabled={savingSkills}
+                    className="mt-2.5 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] font-medium text-primary hover:bg-primary/5 rounded-xl transition-all disabled:opacity-40 border border-primary/20"
+                  >
+                    <Save className="w-4 h-4" />
+                    {savingSkills ? '保存中...' : '保存技能设置'}
+                  </button>
+                )}
+              </div>
 
               {/* AI System Prompt Editor */}
               <div className="pt-4 border-t border-white/10 dark:border-white/[0.04]">

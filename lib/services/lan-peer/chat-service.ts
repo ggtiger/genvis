@@ -96,6 +96,16 @@ export async function updateGroup(groupId: string, partial: Partial<Pick<ChatGro
   return group;
 }
 
+/** Lightweight touch: update only updatedAt to reflect latest message activity. */
+export async function touchGroupTimestamp(groupId: string): Promise<void> {
+  try {
+    const group = await getGroup(groupId);
+    if (!group) return;
+    group.updatedAt = Date.now();
+    await fs.writeFile(groupFile(groupId), JSON.stringify(group, null, 2), 'utf8');
+  } catch { /* ignore */ }
+}
+
 /** Update the Claude SDK session ID for a group (for conversation context continuity). */
 export async function updateGroupSession(groupId: string, sessionId: string): Promise<void> {
   const group = await getGroup(groupId);

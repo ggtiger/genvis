@@ -18,7 +18,7 @@ import { lanPeerStream } from './lan-peer-stream';
 import { createLanMessage } from './lan-message-service';
 import { updateGroupSession, getGroup } from './chat-service';
 import { buildSoulPromptBlock } from '@/lib/services/secretary-soul';
-import { getClaudeCodeExecutablePath, getBuiltinNodeDir } from '@/lib/config/paths';
+import { getClaudeCodeExecutablePath, getBuiltinNodeDir, USER_SKILLS_DIR_ABSOLUTE } from '@/lib/config/paths';
 import { CLAUDE_DEFAULT_MODEL, normalizeClaudeModelId } from '@/lib/constants/claudeModels';
 
 // ========== Constants ==========
@@ -39,6 +39,7 @@ const TOOL_NAME_ACTION_MAP: Record<string, ToolAction> = {
   Glob: 'Searched', glob: 'Searched', glob_files: 'Searched', search_files: 'Searched',
   Grep: 'Searched', grep: 'Searched',
   Bash: 'Executed', bash: 'Executed', run: 'Executed', run_bash: 'Executed', shell: 'Executed',
+  Skill: 'Executed', skill: 'Executed',
   todo_write: 'Generated', todo: 'Generated', plan_write: 'Generated',
 };
 
@@ -73,9 +74,12 @@ const LAN_DEFAULT_SYSTEM_PROMPT = `你是一个局域网群聊中的 群助理�
 当用户需要操作文件或执行代码时，使用你的工具来完成。
 保持简洁友好，用中文回复。
 
-重要：你当前在群聊环境中，不支持交互式工具。
-- 禁止使用 AskUserQuestion 或任何需要用户实时输入的工具。
-- 如果需要用户确认或选择，请直接在聊天消息中用文字提问，等待用户回复。`;
+重要安全限制：
+- 你当前在群聊沙箱环境中，只能操作群组工作目录和群主授权的技能目录。
+- 禁止访问或操作任何其他系统目录、用户目录或项目目录。
+- 禁止使用 AskUserQuestion 或任何需要用户实时输入的交互式工具。
+- 如果需要用户确认或选择，请直接在聊天消息中用文字提问，等待用户回复。
+- 所有文件操作请使用相对路径（相对于当前工作目录）。`;
 
 /**
  * Build the final system prompt for a LAN chat group.
@@ -95,6 +99,63 @@ async function buildLanSystemPrompt(groupId: string): Promise<string> {
     if (soulBlock) parts.push(soulBlock);
   } catch (err) {
     console.warn('[LanClaude] Failed to load SOUL block:', err);
+  }
+
+  // 3. Inject SKILL.md content for each enabled skill
+  // This is critical — without this, AI only knows skill names but not their actual content/methods
+  const enabledSkills = group?.enabledSkills || [];
+  if (enabledSkills.length > 0) {
+    const skillsRoot = path.join(process.cwd(), 'skills');
+    const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
+
+    for (const skillName of enabledSkills) {
+      // Priority: user-skills > builtin skills (same as skill-service)
+      const userPath = path.join(userSkillsRoot, skillName, 'SKILL.md');
+      const builtinPath = path.join(skillsRoot, skillName, 'SKILL.md');
+      let skillContent: string | null = null;
+
+      try {
+        await fs.access(userPath);
+        skillContent = await fs.readFile(userPath, 'utf-8');
+        console.log(`[LanClaude] 📖 Loaded SKILL.md from user-skills: ${skillName}`);
+      } catch {}
+
+      if (!skillContent) {
+        try {
+          await fs.access(builtinPath);
+          skillContent = await fs.readFile(builtinPath, 'utf-8');
+          console.log(`[LanClaude] 📖 Loaded SKILL.md from skills: ${skillName}`);
+        } catch {
+          console.warn(`[LanClaude] ⚠️ SKILL.md not found for skill: ${skillName}`);
+        }
+      }
+
+      if (skillContent) {
+        // Strip frontmatter (---...--- block) for cleaner injection
+        const contentWithoutFrontmatter = skillContent.replace(/^---\n[\s\S]*?---\n/, '').trim();
+        parts.push(
+          `\n\n========== ${skillName} 技能说明 ==========\n${contentWithoutFrontmatter}\n` +
+          `==========================================\n`
+        );
+      }
+    }
+
+    // Add guidance to use the Skill tool (not just Bash)
+    const skillNames = enabledSkills.join('、');
+    parts.push(
+      `## 技能使用规范\n` +
+      `上方已加载以下技能的具体说明：${skillNames}。\n\n` +
+      `**重要**：SKILL.md 中提到的 python3、bash、脚本路径等命令在群聊环境中不可用。` +
+      `你必须使用 Skill 工具来调用技能，而不是直接执行脚本。\n\n` +
+      `使用方法：\n` +
+      `1. 调用 Skill 工具，skill 参数为技能名称（如 "xlsx"、"baidu-search"）\n` +
+      `2. 在 args 参数中传入自然语言任务描述\n` +
+      `3. 例如：Skill(skill="baidu-search", args="搜索最新AI大模型排名")\n\n` +
+      `禁止事项：\n` +
+      `- 不要用 Bash 执行 python3 命令\n` +
+      `- 不要尝试直接运行 SKILL.md 中的脚本路径\n` +
+      `- 必须通过 Skill 工具来使用技能`
+    );
   }
 
   return parts.join('\n\n');
@@ -193,23 +254,168 @@ export async function executeLanClaude(params: ExecuteLanClaudeParams): Promise<
       envWithBuiltinNode.PATH = `${builtinNodeDir}:${process.env.PATH || ''}`;
     }
 
-    // canUseTool — auto-approve most tools, but deny interactive tools
-    // that require real-time user input (not supported in group chat context)
+    // ========== Skill Plugin Loading ==========
+    const group = await getGroup(groupId);
+    const enabledSkills = group?.enabledSkills || [];
+    const skillsRoot = path.join(process.cwd(), 'skills');
+    const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
+
+    // Use the same plugin loading approach as project chat:
+    // Pass USER_SKILLS_DIR_ABSOLUTE (parent dir containing .claude-plugin/plugin.json)
+    // SDK will scan this directory and register Skill tool based on plugin.json
+    const plugins: { type: 'local'; path: string }[] = [];
+    if (enabledSkills.length > 0) {
+      plugins.push({ type: 'local', path: USER_SKILLS_DIR_ABSOLUTE });
+      console.log(`[LanClaude] 🧩 Loading skill plugins from: ${USER_SKILLS_DIR_ABSOLUTE}`);
+      console.log(`[LanClaude] 🧩 Group enabled skills: ${enabledSkills.join(', ')}`);
+    } else {
+      console.log(`[LanClaude] ℹ️ No skill plugins to load (enabledSkills empty)`);
+    }
+
+    // Inject env vars from enabled skills
+    for (const skillName of enabledSkills) {
+      try {
+        const { getSkillEnvVars } = await import('@/lib/services/skill-service');
+        const skillEnv = await getSkillEnvVars(skillName);
+        if (Object.keys(skillEnv).length > 0) {
+          Object.assign(envWithBuiltinNode, skillEnv);
+          console.log(`[LanClaude] 🔑 Injected env vars from skill "${skillName}":`, Object.keys(skillEnv));
+        }
+      } catch {}
+    }
+
+    // ========== Security Sandbox ==========
+    // Allowed directories: group workspace + enabled skill folders ONLY
+    const allowedPaths: string[] = [workspace];
+    for (const skill of enabledSkills) {
+      allowedPaths.push(path.join(skillsRoot, skill));
+      allowedPaths.push(path.join(userSkillsRoot, skill));
+    }
+    // Also allow the group's own data directory (for group.json, memory, etc.)
+    const groupDataDir = path.join(DATA_DIR, groupId);
+    allowedPaths.push(groupDataDir);
+
+    /** Check if a resolved absolute path falls within any allowed directory */
+    function isPathAllowed(targetPath: string): boolean {
+      const resolved = path.resolve(workspace, targetPath);
+      return allowedPaths.some(allowed => resolved === allowed || resolved.startsWith(allowed + path.sep));
+    }
+
+    /** Extract all path-like arguments from tool input */
+    function extractAllPaths(toolInput: Record<string, unknown>): string[] {
+      const pathKeys = ['file_path', 'filePath', 'path', 'target', 'file', 'filename', 'directory', 'dir'];
+      const paths: string[] = [];
+      for (const key of pathKeys) {
+        const val = toolInput[key];
+        if (typeof val === 'string' && val.trim()) paths.push(val.trim());
+      }
+      return paths;
+    }
+
+    /** Check bash/shell commands for unsafe directory references */
+    function isBashCommandSafe(command: string): { safe: boolean; reason?: string } {
+      const resolvedAllowed = allowedPaths.map(p => path.resolve(p));
+
+      function isAbsPathAllowed(absPath: string): boolean {
+        const resolved = path.resolve(absPath);
+        return resolvedAllowed.some(a => resolved === a || resolved.startsWith(a + path.sep));
+      }
+
+      // 1. Block ~ and $HOME references (expand to user home directory)
+      if (/(?:^|\s|[;&|`"'(])~(?:\/|\s|$|[;&|`"')])/m.test(command) || /\$HOME/i.test(command)) {
+        return { safe: false, reason: '禁止访问用户主目录 (~/$HOME)，只允许操作群组工作目录和授权技能目录' };
+      }
+
+      // 2. Remove URL patterns first to avoid false positives
+      // Match http://, https://, file://, ftp:// etc. and remove them
+      const commandWithoutUrls = command.replace(/(?:https?|file|ftp):\/\/[^\s'"]+/gi, '');
+
+      // 3. Extract ALL absolute path references from the command (without URLs)
+      // Match /path/to/something patterns (must start with / and have at least one char after)
+      // Exclude: // (protocol), / at end of word (like w/ in URLs)
+      const absPathRegex = /(?:^|[\s=:"'`(])(\/[\w.\-]+(?:\/[\w.\-]+)*)(?=[\s'"`)&|]|$)/gm;
+      let match;
+      while ((match = absPathRegex.exec(commandWithoutUrls)) !== null) {
+        const foundPath = match[1];
+        // Skip URL-like patterns (double slash like //example.com)
+        if (/^\/\/[^\/]/.test(foundPath)) continue;
+        // Skip common safe command paths like /usr/bin, /bin, etc.
+        if (/^\/(?:usr\/(?:bin|local\/bin)|bin|dev\/null|tmp)(?:\/|$)/.test(foundPath)) continue;
+        if (!isAbsPathAllowed(foundPath)) {
+          return { safe: false, reason: `禁止访问目录: ${foundPath}，只允许操作群组工作目录和授权的技能目录` };
+        }
+      }
+
+      // 4. Block environment variable paths that could escape sandbox
+      if (/\$\{?(?:PATH|TMPDIR|SHELL)\}?/.test(command)) {
+        // Allow PATH references in non-destructive contexts
+      }
+
+      return { safe: true };
+    }
+
+    // canUseTool — enforce security sandbox for group chat
     const DENIED_TOOLS = new Set([
       'AskUserQuestion', 'ask_user_question', 'askUserQuestion',
       'AskFollowupQuestion', 'ask_followup_question',
     ]);
+    // Tools that operate on file paths
+    const FILE_TOOLS = new Set([
+      'Read', 'read', 'read_file', 'read-file',
+      'Write', 'write', 'write_file', 'write-file', 'create_file',
+      'Edit', 'edit', 'edit_file', 'edit-file', 'update_file', 'apply_patch', 'patch_file',
+      'remove_file', 'delete_file', 'delete', 'remove',
+      'list_files', 'list', 'ls',
+      'Glob', 'glob', 'glob_files', 'search_files',
+      'Grep', 'grep',
+    ]);
+    // Tools that execute commands
+    const EXEC_TOOLS = new Set([
+      'Bash', 'bash', 'run', 'run_bash', 'shell',
+    ]);
+
     const canUseTool = async (toolName: string, toolInput: Record<string, unknown>) => {
+      // Log Skill tool calls for debugging
+      if (toolName === 'Skill') {
+        const skillInput = (toolInput as any) || {};
+        console.log(`[LanClaude] 🔧 Skill tool called: ${JSON.stringify({ skillName: skillInput.skill, args: skillInput.args, toolUseID: 'pending' })}`);
+      }
+
+      // 1. Block interactive tools
       if (DENIED_TOOLS.has(toolName)) {
         return {
           behavior: 'deny' as const,
           message: '群聊环境不支持交互式工具，请直接在消息中提问',
         };
       }
+
+      // 2. File tools — validate all paths are within allowed directories
+      if (FILE_TOOLS.has(toolName)) {
+        const paths = extractAllPaths(toolInput);
+        for (const p of paths) {
+          if (!isPathAllowed(p)) {
+            const msg = `安全限制：禁止访问 ${p}。群聊 AI 只能操作群组工作目录和授权的技能目录。`;
+            console.warn(`[LanClaude] ⛔ Path denied: ${p} (tool: ${toolName})`);
+            return { behavior: 'deny' as const, message: msg };
+          }
+        }
+      }
+
+      // 3. Execution tools — validate command doesn't escape sandbox
+      if (EXEC_TOOLS.has(toolName)) {
+        const command = (toolInput.command || toolInput.input || '') as string;
+        const check = isBashCommandSafe(command);
+        if (!check.safe) {
+          console.warn(`[LanClaude] ⛔ Command denied: ${command.slice(0, 100)} (reason: ${check.reason})`);
+          return { behavior: 'deny' as const, message: check.reason || '命令被安全策略拒绝' };
+        }
+      }
+
       return { behavior: 'allow' as const, updatedInput: toolInput };
     };
 
     // PostToolUse hook — capture tool execution results and publish to frontend
+    // Also publishes ai_tool_use event so the UI shows the tool call card
     const postToolUseHook = async (input: any, toolUseID: string) => {
       try {
         if (input.hook_event_name !== 'PostToolUse') return {};
@@ -217,7 +423,20 @@ export async function executeLanClaude(params: ExecuteLanClaudeParams): Promise<
         const toolInput = input.tool_input || {};
         const toolResponse = input.tool_response || '';
 
-        console.log(`[LanClaude] ✅ PostToolUse: ${toolName} | id=${toolUseID}`);
+        console.log(`[LanClaude] ✅ PostToolUse: ${toolName} | id=${toolUseID} | input=${JSON.stringify(toolInput).slice(0, 200)} | response=${typeof toolResponse === 'string' ? toolResponse.slice(0, 500) : JSON.stringify(toolResponse).slice(0, 500)}`);
+
+        // Publish ai_tool_use event so UI shows the tool call card
+        lanPeerStream.publish({
+          type: 'ai_tool_use',
+          data: {
+            groupId, requestId, toolName,
+            toolInput,
+            action: inferActionFromToolName(toolName),
+            filePath: extractPathFromInput(toolInput),
+            messageId: randomUUID(),
+            timestamp: new Date().toISOString(),
+          },
+        });
 
         const action = inferActionFromToolName(toolName);
         const filePath = extractPathFromInput(toolInput);
@@ -310,25 +529,87 @@ export async function executeLanClaude(params: ExecuteLanClaudeParams): Promise<
       }
     };
 
+    // PreToolUse hook — enforce security sandbox BEFORE tool execution
+    // This hook runs regardless of permissionMode, unlike canUseTool which is
+    // skipped when permissionMode is 'bypassPermissions'.
+    const preToolUseHook = async (input: any, toolUseID: string | undefined) => {
+      if (input.hook_event_name !== 'PreToolUse') return {};
+      const toolName = input.tool_name || '';
+      console.log(`[LanClaude] 🔧 PreToolUse hook: ${toolName} | id=${toolUseID}`);
+      if (toolName === 'Skill') {
+        console.log(`[LanClaude] 🔧 Skill tool PreToolUse: input=${JSON.stringify(input.tool_input || {}).slice(0, 500)}`);
+      }
+      const toolInput = (input.tool_input || {}) as Record<string, unknown>;
+
+      // 1. Block interactive tools
+      if (DENIED_TOOLS.has(toolName)) {
+        console.warn(`[LanClaude] ⛔ PreToolUse blocked interactive tool: ${toolName}`);
+        return {
+          decision: 'block' as const,
+          reason: '群聊环境不支持交互式工具，请直接在消息中提问',
+        };
+      }
+
+      // 2. File tools — validate all paths are within allowed directories
+      if (FILE_TOOLS.has(toolName)) {
+        const paths = extractAllPaths(toolInput);
+        for (const p of paths) {
+          if (!isPathAllowed(p)) {
+            console.warn(`[LanClaude] ⛔ PreToolUse path denied: ${p} (tool: ${toolName})`);
+            return {
+              decision: 'block' as const,
+              reason: `安全限制：禁止访问 ${p}。群聊 AI 只能操作群组工作目录和授权的技能目录。`,
+            };
+          }
+        }
+      }
+
+      // 3. Execution tools — validate command doesn't escape sandbox
+      if (EXEC_TOOLS.has(toolName)) {
+        const command = (toolInput.command || toolInput.input || '') as string;
+        const check = isBashCommandSafe(command);
+        if (!check.safe) {
+          console.warn(`[LanClaude] ⛔ PreToolUse command denied: ${command.slice(0, 100)} (reason: ${check.reason})`);
+          return {
+            decision: 'block' as const,
+            reason: check.reason || '命令被安全策略拒绝',
+          };
+        }
+      }
+
+      return {}; // Allow tool execution
+    };
+
     // Build hooks config
     const hooks = {
+      PreToolUse: [{ hooks: [preToolUseHook] }],
       PostToolUse: [{ hooks: [postToolUseHook] }],
       PostToolUseFailure: [{ hooks: [postToolUseFailureHook] }],
     };
 
     // Call Claude Agent SDK
+    // Use 'default' permissionMode so the SDK properly registers all tools including Skill.
+    // canUseTool callback auto-approves all non-blocked tools (returns 'allow').
+    // This ensures Skill tool is available when plugins are loaded.
+    // IMPORTANT: Use USER_SKILLS_DIR_ABSOLUTE as cwd so SDK can find skills correctly.
+    // The workspace is added to additionalDirectories for file access.
+    const hasPlugins = plugins.length > 0;
+    console.log(`[LanClaude] 🚀 SDK query() options: { cwd: ${USER_SKILLS_DIR_ABSOLUTE}, plugins: ${hasPlugins ? plugins.length : 'none'}, allowedTools: ${hasPlugins ? 'yes' : 'none'}, settingSources: ${hasPlugins ? 'project' : 'none'}, model: ${finalModel} }`);
     const response = query({
       prompt: instruction,
       options: {
-        cwd: workspace,
-        additionalDirectories: [workspace],
+        cwd: USER_SKILLS_DIR_ABSOLUTE, // Use user-skills dir so SDK can find skills
+        additionalDirectories: allowedPaths, // Include workspace for file operations
         model: finalModel,
         resume: sessionId,
-        permissionMode: 'bypassPermissions',
+        permissionMode: 'default',
         systemPrompt: await buildLanSystemPrompt(groupId),
         maxOutputTokens,
         pathToClaudeCodeExecutable: getClaudeCodeExecutablePath(),
         env: envWithBuiltinNode,
+        plugins: hasPlugins ? plugins : undefined,
+        allowedTools: hasPlugins ? ['Skill', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] : undefined,
+        settingSources: hasPlugins ? ['project'] : undefined,
         canUseTool,
         hooks,
         stderr: (data: string) => {
@@ -621,13 +902,22 @@ export async function executeLanClaude(params: ExecuteLanClaudeParams): Promise<
       console.error(`[LanClaude] Last stderr lines:\n${stderrBuffer.slice(-10).join('\n')}`);
     }
   
-    // Check if session is invalid and clear it
+    // Check if session is invalid — auto-retry WITHOUT session (start fresh)
     const errMsg = (error as Error).message || '';
-    if (/No conversation found|session.*not found/i.test(errMsg) || stderrBuffer.some((l: string) => /No conversation found|session.*not found/i.test(l))) {
+    const isSessionError = /No conversation found|session.*not found/i.test(errMsg) || stderrBuffer.some((l: string) => /No conversation found|session.*not found/i.test(l));
+    if (isSessionError && sessionId) {
+      console.log(`[LanClaude] Session expired, clearing and auto-retrying without session | group=${groupId}`);
       try {
         await updateGroupSession(groupId, '');
-        console.log(`[LanClaude] Cleared invalid session for group: ${groupId}`);
       } catch {}
+      // Retry with fresh session — recursive call without sessionId
+      try {
+        await executeLanClaude({ ...params, sessionId: undefined });
+        return; // Retry succeeded, done
+      } catch (retryErr) {
+        console.error(`[LanClaude] Retry also failed:`, retryErr);
+        // Fall through to error reporting below
+      }
     }
   
     // Build user-friendly error message
@@ -636,8 +926,6 @@ export async function executeLanClaude(params: ExecuteLanClaudeParams): Promise<
       errorContent = 'AI \u56DE\u590D\u5931\u8D25: Claude CLI \u672A\u8BA4\u8BC1\uFF0C\u8BF7\u8FD0\u884C claude auth login';
     } else if (/command not found/i.test(errMsg)) {
       errorContent = 'AI \u56DE\u590D\u5931\u8D25: Claude CLI \u672A\u5B89\u88C5\uFF0C\u8BF7\u8FD0\u884C npm install -g @anthropic-ai/claude-code';
-    } else if (/No conversation found|session.*not found/i.test(errMsg) || stderrBuffer.some((l: string) => /No conversation found/i.test(l))) {
-      errorContent = 'AI \u56DE\u590D\u5931\u8D25: \u4F1A\u8BDD\u8BB0\u5F55\u4E0D\u5B58\u5728\uFF0C\u5DF2\u81EA\u52A8\u6E05\u7406\uFF0C\u8BF7\u91CD\u65B0\u53D1\u9001\u6D88\u606F';
     } else {
       const tail = stderrBuffer.slice(-5).join(' ');
       errorContent = `AI \u56DE\u590D\u5931\u8D25: ${errMsg || tail || '\u672A\u77E5\u9519\u8BEF'}`;

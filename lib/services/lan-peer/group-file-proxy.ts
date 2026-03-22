@@ -16,6 +16,15 @@ import { getGroup } from './chat-service';
 import { getLanPeerManager } from './manager';
 
 /**
+ * Extract baseMachineId from peerId by stripping the -p{port} suffix.
+ * e.g. "a1b2c3d4-p3000" -> "a1b2c3d4"
+ * Only used for peer registry lookup fallback (cross-machine port change), NOT for identity checks.
+ */
+export function extractBaseMachineId(peerId: string): string {
+  return peerId.replace(/-p\d+$/, '');
+}
+
+/**
  * Resolve the proxy base URL for a group's creator node.
  * 
  * @param groupId - The group ID (same ID used as projectId in /api/repo/ routes)
@@ -24,16 +33,67 @@ import { getLanPeerManager } from './manager';
 export async function resolveGroupProxyUrl(groupId: string): Promise<string | null> {
   // Check if this is a known group
   const group = await getGroup(groupId);
-  if (!group) return null;
+  if (!group) {
+    console.log(`[GroupFileProxy] Group not found locally: ${groupId}`);
+    return null;
+  }
 
   const manager = getLanPeerManager();
-  if (!manager) return null;
+  if (!manager) {
+    console.log(`[GroupFileProxy] LanPeerManager not initialized`);
+    return null;
+  }
+
+  // Check if WE are the creator — EXACT peerId match
+  // (same machine with different ports = different instances, must NOT match)
+  if (group.creatorId === manager.peerId) {
+    return null;
+  }
 
   const peers = manager.discovery.getRegistry().getPeers();
-  const creator = peers.find((p) => p.id === group.creatorId);
-  if (!creator || creator.status !== 'online') return null;
 
-  return `http://${creator.ip}:${creator.httpPort}`;
+  // 1. Exact peerId match in registry
+  let creator = peers.find((p) => p.id === group.creatorId && p.status === 'online');
+
+  // 2. Fallback: baseMachineId match (handles cross-machine port change after restart)
+  //    Exclude self to avoid matching another instance on the same machine
+  if (!creator) {
+    const creatorBase = extractBaseMachineId(group.creatorId);
+    const myBase = extractBaseMachineId(manager.peerId);
+    if (creatorBase !== myBase) {
+      // Only use fallback for cross-machine scenario (different baseMachineId)
+      creator = peers.find((p) => extractBaseMachineId(p.id) === creatorBase && p.status === 'online');
+      if (creator) {
+        console.log(`[GroupFileProxy] Matched creator by baseMachineId fallback: ${group.creatorId} -> ${creator.id}`);
+      }
+    }
+  }
+
+  if (!creator) {
+    console.log(`[GroupFileProxy] Creator peer not found in registry: ${group.creatorId} (known peers: ${peers.map(p => p.id).join(', ')})`);
+    return null;
+  }
+  if (creator.status !== 'online') {
+    console.log(`[GroupFileProxy] Creator peer offline: ${creator.id}`);
+    return null;
+  }
+
+  const url = `http://${creator.ip}:${creator.httpPort}`;
+
+  // If creator is on the same machine, use 127.0.0.1 instead of LAN IP
+  // This handles the case where Next.js only listens on localhost
+  try {
+    const { getPrimaryLanIP } = await import('@/lib/utils/network');
+    const localIP = getPrimaryLanIP();
+    if (localIP && creator.ip === localIP) {
+      const localUrl = `http://127.0.0.1:${creator.httpPort}`;
+      console.log(`[GroupFileProxy] Creator on same machine, using localhost: ${localUrl}`);
+      return localUrl;
+    }
+  } catch {}
+
+  console.log(`[GroupFileProxy] Resolved proxy URL for group ${groupId}: ${url}`);
+  return url;
 }
 
 /**

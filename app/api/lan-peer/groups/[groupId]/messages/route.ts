@@ -6,7 +6,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
-import { getGroup } from '@/lib/services/lan-peer/chat-service';
+import { getGroup, touchGroupTimestamp } from '@/lib/services/lan-peer/chat-service';
 import { createLanMessage, getLanMessagesByGroup } from '@/lib/services/lan-peer/lan-message-service';
 import { parseInteractionMode } from '@/lib/services/lan-peer/message-parser';
 import { getLanPeerManager } from '@/lib/services/lan-peer/manager';
@@ -89,6 +89,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Notify local SSE clients
     lanPeerStream.publish({ type: 'new_message', data: { message } });
 
+    // Update group timestamp for sorting (most recent message first)
+    touchGroupTimestamp(groupId).catch(() => {});
+
     // Broadcast to group members via WebSocket
     if (manager && group) {
       manager.transport.broadcast({
@@ -100,20 +103,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }, group.members);
     }
 
-    // If skill_invoke mode, trigger skill call
-    if (interaction.mode === 'skill_invoke' && enabledSkills.length > 0) {
-      handleSkillInvoke(groupId, message, enabledSkills, manager).catch((err) => {
-        console.error('[LanPeer] Skill invoke failed:', err);
-      });
-    }
-
-    // Trigger AI reply ONLY if this node is the group creator.
-    // Non-creator nodes just send the message; the creator's node will
-    // receive it via WebSocket and trigger AI there (see manager.ts handleMessage).
+    // If skill_invoke mode, trigger AI reply with skill plugins loaded (NOT REST API call).
+    // Skills like baidu-search, pdf, docx, xlsx are Claude SDK plugins loaded via
+    // the `plugins` parameter in executeLanClaude. The AI will use them naturally.
+    // Also trigger for plain ai_chat mode.
     const localPeerId = manager?.peerId || 'local';
     const isCreator = group?.creatorId === localPeerId || group?.creatorId === 'local';
 
-    if (message.messageType === 'text' && interaction.mode !== 'skill_invoke' && interaction.mode !== 'no_ai' && isCreator) {
+    if (message.messageType === 'text' && interaction.mode !== 'no_ai' && isCreator) {
       handleAIReply(groupId, message, interaction.cleanContent, manager, group).catch((err) => {
         console.error('[LanPeer] AI reply failed:', err);
       });
@@ -126,62 +123,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 }
 
-async function handleSkillInvoke(
-  groupId: string,
-  message: ChatMessage,
-  enabledSkills: string[],
-  manager: any,
-): Promise<void> {
-  const { handleSkillRequest } = await import('@/lib/services/lan-peer/peer-skill-service');
-  const skillName = enabledSkills[0];
-  const result = await handleSkillRequest(skillName, 'GET', '/api/todos', undefined, undefined);
-
-  const resultContent = result.success ? `技能 ${skillName} 执行成功` : `技能调用失败: ${result.error}`;
-
-  // Persist to database
-  const savedMsg = await createLanMessage({
-    groupId,
-    role: 'assistant',
-    messageType: 'skill_result',
-    content: resultContent,
-    senderId: manager?.peerId || 'system',
-    senderName: '技能助手',
-    interactionMode: 'plain',
-    metadata: { skillResult: result },
-  });
-
-  const resultMessage: ChatMessage = {
-    id: savedMsg.id,
-    groupId,
-    senderId: manager?.peerId || 'system',
-    senderName: '技能助手',
-    content: resultContent,
-    messageType: 'skill_result',
-    interactionMode: 'plain',
-    skillResult: result,
-    timestamp: new Date(savedMsg.createdAt).getTime(),
-    status: 'sent',
-  };
-
-  // Notify local SSE
-  lanPeerStream.publish({ type: 'new_message', data: { message: resultMessage } });
-
-  // Broadcast skill result
-  const group = await (await import('@/lib/services/lan-peer/chat-service')).getGroup(groupId);
-  if (manager && group) {
-    manager.transport.broadcast({
-      type: 'GROUP_MESSAGE',
-      senderId: resultMessage.senderId,
-      senderName: resultMessage.senderName,
-      timestamp: resultMessage.timestamp,
-      payload: { message: resultMessage },
-    }, group.members);
-  }
-}
-
 /**
  * Handle AI reply using Claude Agent SDK.
  * Streams response tokens via SSE and persists final messages to the database.
+ * When the group has enabledSkills, they are loaded as SDK plugins.
  */
 async function handleAIReply(
   groupId: string,

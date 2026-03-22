@@ -13,6 +13,8 @@ import {
 } from '@/lib/services/file-browser';
 import { getProjectById } from '@/lib/services/project';
 import { resolveGroupProxyUrl } from '@/lib/services/lan-peer/group-file-proxy';
+import { getGroup } from '@/lib/services/lan-peer/chat-service';
+import { getLanPeerManager } from '@/lib/services/lan-peer/manager';
 
 interface RouteContext {
   params: Promise<{ project_id: string }>;
@@ -110,7 +112,32 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    // Check if project exists locally (includes virtual group workspace on creator's machine)
+    // For group IDs: non-creator MUST proxy to creator
+    const group = await getGroup(project_id);
+    const manager = getLanPeerManager();
+    const isGroupCreator = group && manager && group.creatorId === manager.peerId;
+
+    if (group && !isGroupCreator) {
+      // Non-creator: always proxy to creator
+      const proxyBaseUrl = await resolveGroupProxyUrl(project_id);
+      if (proxyBaseUrl) {
+        const proxyUrl = `${proxyBaseUrl}/api/repo/${project_id}/file?${searchParams.toString()}`;
+        const proxyRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(30000) });
+        if (!proxyRes.ok) {
+          return new NextResponse(await proxyRes.text(), { status: proxyRes.status });
+        }
+        const contentType = proxyRes.headers.get('content-type') || 'application/octet-stream';
+        const body = await proxyRes.arrayBuffer();
+        const resp = new NextResponse(Buffer.from(body) as unknown as BodyInit);
+        resp.headers.set('Content-Type', contentType);
+        resp.headers.set('Content-Length', String(body.byteLength));
+        resp.headers.set('Cache-Control', 'no-store');
+        return resp;
+      }
+      return NextResponse.json({ error: '群主不在线，无法访问文件' }, { status: 503 });
+    }
+
+    // Local access (project or group creator)
     const project = await getProjectById(project_id);
     if (!project) {
       // Not a local project — try proxying to group creator
