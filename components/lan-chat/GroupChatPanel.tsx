@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { ArrowUp, Users, Trash2, Save, Settings, Zap, FolderOpen, X, Square, UserPlus, UserMinus, Download, Pencil, Check, Clock, Plus, Minus, Play, Bot } from 'lucide-react';
+import { ArrowUp, Users, Trash2, Save, Settings, Zap, FolderOpen, X, Square, UserPlus, UserMinus, Download, Pencil, Check, Clock, Plus, Minus, Play, Bot, LogOut } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ChatMessageBubble from './ChatMessageBubble';
@@ -30,9 +30,10 @@ interface GroupChatPanelProps {
   peers: PeerInfo[];
   selfInfo?: PeerInfo | null;
   onDeleteGroup?: (groupId: string) => void;
+  onLeaveGroup?: (groupId: string) => void;
 }
 
-export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }: GroupChatPanelProps) {
+export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, onLeaveGroup }: GroupChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [inputValue, setInputValue] = useState('');
@@ -622,6 +623,9 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
   // Available peers to add (online, not already in group)
   const availablePeers = peers.filter(p => p.status === 'online' && !groupMembers.includes(p.id));
 
+  // Permission: is current user the group creator?
+  const isGroupCreator = localPeerId === group.creatorId || group.creatorId === 'local';
+
   return (
     <div className="flex-1 flex flex-col h-full relative">
       {/* Header */}
@@ -754,6 +758,7 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
                 projectId={group.id}
                 currentDir={currentPath}
                 compact
+                readOnly={!isGroupCreator}
                 onFileClick={handleFileClick}
                 onFolderClick={(folder) => loadTree(folder.path)}
                 onRefresh={() => loadTreeRef.current?.('.')}
@@ -782,7 +787,7 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
               <div>
                 <h3 className="text-[13px] font-semibold text-text-main mb-2">群组名称</h3>
                 <div className="flex items-center gap-2">
-                  {editingName ? (
+                  {editingName && isGroupCreator ? (
                     <>
                       <input
                         autoFocus
@@ -810,13 +815,15 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
                   ) : (
                     <>
                       <span className="flex-1 text-[13px] text-text-main truncate">{groupName}</span>
-                      <button
-                        onClick={() => setEditingName(true)}
-                        className="p-1.5 rounded-lg text-text-secondary/50 hover:text-primary hover:bg-white/20 dark:hover:bg-white/[0.04] transition-colors"
-                        title="修改名称"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
+                      {isGroupCreator && (
+                        <button
+                          onClick={() => setEditingName(true)}
+                          className="p-1.5 rounded-lg text-text-secondary/50 hover:text-primary hover:bg-white/20 dark:hover:bg-white/[0.04] transition-colors"
+                          title="修改名称"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -826,13 +833,15 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-[13px] font-semibold text-text-main">群组成员 ({groupMembers.length})</h3>
-                  <button
-                    onClick={() => setShowAddMember(!showAddMember)}
-                    className={`p-1.5 rounded-lg transition-colors ${showAddMember ? 'bg-primary/10 text-primary' : 'text-text-secondary/50 hover:text-primary/70 hover:bg-white/30 dark:hover:bg-white/[0.06]'}`}
-                    title="添加成员"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                  </button>
+                  {isGroupCreator && (
+                    <button
+                      onClick={() => setShowAddMember(!showAddMember)}
+                      className={`p-1.5 rounded-lg transition-colors ${showAddMember ? 'bg-primary/10 text-primary' : 'text-text-secondary/50 hover:text-primary/70 hover:bg-white/30 dark:hover:bg-white/[0.06]'}`}
+                      title="添加成员"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
 
                 {/* Add member dropdown */}
@@ -885,7 +894,7 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
                             <div className="text-[11px] text-text-secondary/40 mt-0.5">离线</div>
                           )}
                         </div>
-                        {!isCreator && (
+                        {!isCreator && isGroupCreator && (
                           <button
                             onClick={() => handleRemoveMember(memberId)}
                             disabled={savingMembers}
@@ -919,35 +928,39 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
               {/* AI System Prompt Editor */}
               <div className="pt-4 border-t border-white/10 dark:border-white/[0.04]">
                 <h3 className="text-[13px] font-semibold text-text-main mb-1">群组 AI 提示词</h3>
-                <p className="text-[11px] text-text-secondary/50 mb-2.5">自定义机器人人设，留空使用默认</p>
+                <p className="text-[11px] text-text-secondary/50 mb-2.5">{isGroupCreator ? '自定义机器人人设，留空使用默认' : '由群主设置'}</p>
                 <textarea
                   value={editingPrompt}
-                  onChange={(e) => setEditingPrompt(e.target.value)}
+                  onChange={(e) => { if (isGroupCreator) setEditingPrompt(e.target.value); }}
                   placeholder="设定 AI 的性格、行为规则..."
                   rows={5}
-                  className="w-full px-3 py-2.5 text-[13px] font-mono rounded-xl border border-white/20 dark:border-white/[0.06] bg-white/30 dark:bg-white/[0.03] text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none placeholder:text-text-secondary/30"
+                  readOnly={!isGroupCreator}
+                  className={`w-full px-3 py-2.5 text-[13px] font-mono rounded-xl border border-white/20 dark:border-white/[0.06] bg-white/30 dark:bg-white/[0.03] text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none placeholder:text-text-secondary/30 ${!isGroupCreator ? 'opacity-60 cursor-not-allowed' : ''}`}
                 />
-                <button
-                  onClick={async () => {
-                    setSavingPrompt(true);
-                    try {
-                      await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ systemPrompt: editingPrompt.trim() || undefined }),
-                      });
-                    } catch { /* ignore */ }
-                    setSavingPrompt(false);
-                  }}
-                  disabled={savingPrompt}
-                  className="mt-2.5 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] font-medium text-primary hover:bg-primary/5 rounded-xl transition-all disabled:opacity-40 border border-primary/20"
-                >
-                  <Save className="w-4 h-4" />
-                  {savingPrompt ? '保存中...' : '保存提示词'}
-                </button>
+                {isGroupCreator && (
+                  <button
+                    onClick={async () => {
+                      setSavingPrompt(true);
+                      try {
+                        await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ systemPrompt: editingPrompt.trim() || undefined }),
+                        });
+                      } catch { /* ignore */ }
+                      setSavingPrompt(false);
+                    }}
+                    disabled={savingPrompt}
+                    className="mt-2.5 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] font-medium text-primary hover:bg-primary/5 rounded-xl transition-all disabled:opacity-40 border border-primary/20"
+                  >
+                    <Save className="w-4 h-4" />
+                    {savingPrompt ? '保存中...' : '保存提示词'}
+                  </button>
+                )}
               </div>
 
-              {/* Scheduled Messages */}
+              {/* Scheduled Messages — creator only */}
+              {isGroupCreator && (
               <div className="pt-4 border-t border-white/10 dark:border-white/[0.04]">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-1.5">
@@ -1091,9 +1104,10 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
                   </button>
                 )}
               </div>
+              )}
 
-              {/* Dissolve group button */}
-              {onDeleteGroup && (
+              {/* Dissolve group button — creator only */}
+              {onDeleteGroup && isGroupCreator && (
                 <div className="pt-4 border-t border-white/10 dark:border-white/[0.04]">
                   <button
                     onClick={() => {
@@ -1105,6 +1119,23 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup }
                   >
                     <Trash2 className="w-4 h-4" />
                     解散群组
+                  </button>
+                </div>
+              )}
+
+              {/* Leave group button — non-creator members */}
+              {onLeaveGroup && !isGroupCreator && (
+                <div className="pt-4 border-t border-white/10 dark:border-white/[0.04]">
+                  <button
+                    onClick={() => {
+                      if (confirm(`确定要退出群组「${group.name}」吗？`)) {
+                        onLeaveGroup(group.id);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 text-[13px] text-orange-400/80 hover:text-orange-500 hover:bg-orange-500/5 rounded-xl transition-all border border-white/10 dark:border-white/[0.04]"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    退出群组
                   </button>
                 </div>
               )}

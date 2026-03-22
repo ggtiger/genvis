@@ -111,6 +111,17 @@ export default function LanChatLayout() {
     } catch { /* ignore */ }
   };
 
+  const handleLeaveGroup = async (groupId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/lan-peer/groups/${groupId}/leave`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setGroups((prev) => prev.filter((g) => g.id !== groupId));
+        if (selectedGroupId === groupId) setSelectedGroupId(null);
+      }
+    } catch { /* ignore */ }
+  };
+
   const selectedGroup = groups.find((g) => g.id === selectedGroupId) || null;
 
   return (
@@ -123,9 +134,13 @@ export default function LanChatLayout() {
             groups={groups}
             selectedGroupId={selectedGroupId}
             activeGroupIds={activeAIGroupIds}
+            localPeerId={selfInfo?.id}
+            peers={peers}
+            selfInfo={selfInfo}
             onSelect={setSelectedGroupId}
             onCreate={() => setShowCreateModal(true)}
             onDelete={handleDeleteGroup}
+            onLeave={handleLeaveGroup}
           />
         </div>
       </div>
@@ -133,7 +148,7 @@ export default function LanChatLayout() {
       {/* Right panel: chat */}
       <div className="flex-1 flex flex-col min-w-0">
         {selectedGroup ? (
-          <GroupChatPanel key={selectedGroup.id} group={selectedGroup} peers={peers} selfInfo={selfInfo} onDeleteGroup={handleDeleteGroup} />
+          <GroupChatPanel key={selectedGroup.id} group={selectedGroup} peers={peers} selfInfo={selfInfo} onDeleteGroup={handleDeleteGroup} onLeaveGroup={handleLeaveGroup} />
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">

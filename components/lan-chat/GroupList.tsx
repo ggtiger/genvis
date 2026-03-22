@@ -1,19 +1,23 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, MessageCircle, Users } from 'lucide-react';
-import type { ChatGroup } from '@/lib/services/lan-peer/types';
+import { Plus, Trash2, MessageCircle, Users, Crown, LogOut } from 'lucide-react';
+import type { ChatGroup, PeerInfo } from '@/lib/services/lan-peer/types';
 
 interface GroupListProps {
   groups: ChatGroup[];
   selectedGroupId: string | null;
   activeGroupIds?: Set<string>;
+  localPeerId?: string;
+  peers?: PeerInfo[];
+  selfInfo?: PeerInfo | null;
   onSelect: (groupId: string) => void;
   onCreate: () => void;
   onDelete?: (groupId: string) => void;
+  onLeave?: (groupId: string) => void;
 }
 
-export default function GroupList({ groups, selectedGroupId, activeGroupIds, onSelect, onCreate, onDelete }: GroupListProps) {
+export default function GroupList({ groups, selectedGroupId, activeGroupIds, localPeerId, peers, selfInfo, onSelect, onCreate, onDelete, onLeave }: GroupListProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; groupId: string; groupName: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -52,6 +56,14 @@ export default function GroupList({ groups, selectedGroupId, activeGroupIds, onS
       <div className="flex flex-col gap-0.5">
         {groups.map((group) => {
           const isActive = activeGroupIds?.has(group.id);
+          const isMine = localPeerId && (group.creatorId === localPeerId || group.creatorId === 'local');
+          // Resolve creator display name
+          const creatorName = (() => {
+            if (isMine) return '我创建';
+            const creatorPeer = peers?.find(p => p.id === group.creatorId);
+            if (creatorPeer) return creatorPeer.name;
+            return group.creatorId.slice(0, 8) + '...';
+          })();
           return (
           <button
             key={group.id}
@@ -84,6 +96,15 @@ export default function GroupList({ groups, selectedGroupId, activeGroupIds, onS
                   selectedGroupId === group.id ? 'text-primary' : ''
                 }`}>{group.name}</div>
                 <div className="text-[11px] text-text-secondary/70 mt-0.5 flex items-center gap-1">
+                  {isMine ? (
+                    <span className="text-primary/70 font-medium flex items-center gap-0.5">
+                      <Crown className="w-3 h-3" />
+                      {creatorName}
+                    </span>
+                  ) : (
+                    <span className="text-text-secondary/50 truncate max-w-[80px]" title={creatorName}>{creatorName}</span>
+                  )}
+                  <span className="text-text-secondary/30">·</span>
                   <span>{group.members.length} 位成员</span>
                   {group.enabledSkills.length > 0 && (
                     <>
@@ -113,26 +134,48 @@ export default function GroupList({ groups, selectedGroupId, activeGroupIds, onS
       </div>
 
       {/* Right-click context menu */}
-      {contextMenu && onDelete && (
-        <div
-          ref={menuRef}
-          className="fixed z-50 bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl rounded-xl shadow-2xl border border-white/20 dark:border-white/10 py-1.5 min-w-[160px]"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
-          <button
-            onClick={() => {
-              if (confirm(`确定要解散群组「${contextMenu.groupName}」吗？\n所有聊天记录将被永久删除。`)) {
-                onDelete(contextMenu.groupId);
-              }
-              setContextMenu(null);
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+      {contextMenu && (() => {
+        const ctxGroup = groups.find(g => g.id === contextMenu.groupId);
+        const isCreator = ctxGroup && localPeerId && (ctxGroup.creatorId === localPeerId || ctxGroup.creatorId === 'local');
+        // Show dissolve for creator, leave for members
+        if (!isCreator && !onLeave) return null;
+        if (isCreator && !onDelete) return null;
+        return (
+          <div
+            ref={menuRef}
+            className="fixed z-50 bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl rounded-xl shadow-2xl border border-white/20 dark:border-white/10 py-1.5 min-w-[160px]"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
           >
-            <Trash2 className="w-3.5 h-3.5" />
-            解散群组
-          </button>
-        </div>
-      )}
+            {isCreator && onDelete ? (
+              <button
+                onClick={() => {
+                  if (confirm(`确定要解散群组「${contextMenu.groupName}」吗？\n所有聊天记录将被永久删除。`)) {
+                    onDelete(contextMenu.groupId);
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                解散群组
+              </button>
+            ) : onLeave ? (
+              <button
+                onClick={() => {
+                  if (confirm(`确定要退出群组「${contextMenu.groupName}」吗？`)) {
+                    onLeave(contextMenu.groupId);
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-500/10 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                退出群组
+              </button>
+            ) : null}
+          </div>
+        );
+      })()}
     </div>
   );
 }

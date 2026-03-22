@@ -25,9 +25,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const updated = await updateGroup(groupId, body);
   if (!updated) return NextResponse.json({ success: false, error: '群组不存在' }, { status: 404 });
 
-  // Broadcast GROUP_UPDATE to all affected peers (old members + new members)
+  // Broadcast GROUP_UPDATE to ALL affected peers for ANY group change
+  // (name, members, systemPrompt, scheduledMessages, enabledSkills, etc.)
   const manager = getLanPeerManager();
-  if (manager && body.members !== undefined) {
+  if (manager) {
     const allAffected = Array.from(new Set([...oldMembers, ...updated.members]));
     manager.transport.broadcast({
       type: 'GROUP_UPDATE',
@@ -46,11 +47,29 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params;
+
+  // Read group data BEFORE deleting so we know who to notify
+  const group = await getGroup(groupId);
+  const members = group?.members || [];
+
   // Clean up database messages first
   await deleteLanMessagesByGroup(groupId);
   // Delete group files
   await deleteGroup(groupId);
-  // Broadcast deletion event so all clients update
+
+  // Broadcast GROUP_DELETE to all members via WebSocket so remote nodes also remove it
+  const manager = getLanPeerManager();
+  if (manager && members.length > 0) {
+    manager.transport.broadcast({
+      type: 'GROUP_DELETE',
+      senderId: manager.peerId,
+      senderName: manager.peerName,
+      timestamp: Date.now(),
+      payload: { groupId },
+    }, members);
+  }
+
+  // Notify local SSE clients
   lanPeerStream.publish({ type: 'group_deleted', data: { groupId } });
   return NextResponse.json({ success: true });
 }

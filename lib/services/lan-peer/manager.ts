@@ -221,21 +221,50 @@ export class LanPeerManager {
         if (updatedGroup) {
           const isMember = Array.isArray(updatedGroup.members) && updatedGroup.members.includes(this.peerId);
           if (isMember) {
-            // Still a member: update local group data
-            const { updateGroup } = await import('./chat-service');
-            await updateGroup(updatedGroup.id, {
-              name: updatedGroup.name,
-              members: updatedGroup.members,
-              enabledSkills: updatedGroup.enabledSkills,
-              systemPrompt: updatedGroup.systemPrompt,
-            });
-            lanPeerStream.publish({ type: 'group_updated', data: { group: updatedGroup } });
+            // Still a member: update local group data, or create if not yet stored (new member added)
+            const { updateGroup, createGroup, getGroup } = await import('./chat-service');
+            const existing = await getGroup(updatedGroup.id);
+            if (existing) {
+              await updateGroup(updatedGroup.id, {
+                name: updatedGroup.name,
+                members: updatedGroup.members,
+                enabledSkills: updatedGroup.enabledSkills,
+                systemPrompt: updatedGroup.systemPrompt,
+                scheduledMessages: updatedGroup.scheduledMessages,
+              });
+              lanPeerStream.publish({ type: 'group_updated', data: { group: updatedGroup } });
+            } else {
+              // New member scenario: group doesn't exist locally yet — create it
+              await createGroup(
+                updatedGroup.id,
+                updatedGroup.name,
+                updatedGroup.creatorId,
+                updatedGroup.members,
+                updatedGroup.enabledSkills || [],
+                updatedGroup.systemPrompt,
+              );
+              lanPeerStream.publish({ type: 'group_created', data: { group: updatedGroup } });
+              console.log(`[LanPeer] New group ${updatedGroup.id} created locally (added as member via GROUP_UPDATE)`);
+            }
           } else {
             // Removed from group: delete local copy
             const { deleteGroup } = await import('./chat-service');
             await deleteGroup(updatedGroup.id);
             lanPeerStream.publish({ type: 'group_deleted', data: { groupId: updatedGroup.id } });
           }
+        }
+        break;
+      }
+      case 'GROUP_DELETE': {
+        // Group owner dissolved the group — delete local copy and notify UI
+        const deletedGroupId = msg.payload.groupId as string;
+        if (deletedGroupId) {
+          const { deleteGroup } = await import('./chat-service');
+          const { deleteLanMessagesByGroup } = await import('./lan-message-service');
+          await deleteLanMessagesByGroup(deletedGroupId);
+          await deleteGroup(deletedGroupId);
+          lanPeerStream.publish({ type: 'group_deleted', data: { groupId: deletedGroupId } });
+          console.log(`[LanPeer] Group ${deletedGroupId} dissolved by owner, local data removed`);
         }
         break;
       }
@@ -275,21 +304,21 @@ export class LanPeerManager {
 const PEER_ID_FILE = path.join(process.cwd(), 'data', 'lan-peer', 'peer-id.txt');
 
 /**
- * Get or create a stable peerId that survives server restarts.
- * Cached in globalThis for HMR, persisted to data/lan-peer/peer-id.txt for restarts.
- * On first run, adopts an existing group's creatorId for backward compatibility,
- * and migrates all local groups to use the same peerId.
+ * Get the base machine peerId (without port suffix).
+ * Persisted to data/lan-peer/peer-id.txt.
  */
-export async function getStablePeerId(): Promise<string> {
+async function getBasePeerId(): Promise<string> {
   const g = globalThis as any;
-  if (g.__lan_peer_id__) return g.__lan_peer_id__;
+  if (g.__lan_base_peer_id__) return g.__lan_base_peer_id__;
 
   // Try to read from disk
   try {
     const saved = (await fs.readFile(PEER_ID_FILE, 'utf8')).trim();
     if (saved) {
-      g.__lan_peer_id__ = saved;
-      return saved;
+      // Strip any old port suffix if present (migration from old format)
+      const base = saved.replace(/-p\d+$/, '');
+      g.__lan_base_peer_id__ = base;
+      return base;
     }
   } catch {
     // File doesn't exist yet — first run
@@ -308,15 +337,17 @@ export async function getStablePeerId(): Promise<string> {
         const raw = await fs.readFile(gFile, 'utf8');
         const group = JSON.parse(raw);
         if (group.creatorId && group.creatorId !== 'local') {
+          // Strip port suffix from old creatorIds
+          const baseCreatorId = group.creatorId.replace(/-p\d+$/, '');
           oldCreatorIds.add(group.creatorId);
-          if (!adoptedId) adoptedId = group.creatorId;
+          if (!adoptedId) adoptedId = baseCreatorId;
         }
       } catch { /* skip invalid groups */ }
     }
   } catch { /* no groups dir yet */ }
 
   const newId = adoptedId || randomUUID();
-  g.__lan_peer_id__ = newId;
+  g.__lan_base_peer_id__ = newId;
 
   // Persist to disk
   try {
@@ -326,29 +357,44 @@ export async function getStablePeerId(): Promise<string> {
     console.error('[LanPeer] Failed to persist peerId:', err);
   }
 
-  // Migrate: update all local groups with mismatched creatorId
-  if (oldCreatorIds.size > 0) {
-    for (const oldId of oldCreatorIds) {
-      if (oldId === newId) continue;
+  return newId;
+}
+
+/**
+ * Get or create a stable peerId that survives server restarts.
+ * Includes HTTP port suffix to support multiple instances on the same machine.
+ * Format: {baseMachineId}-p{httpPort}
+ */
+export async function getStablePeerId(): Promise<string> {
+  const httpPort = parseInt(process.env.PORT || '3000', 10);
+  const cacheKey = `__lan_peer_id_p${httpPort}__`;
+  const g = globalThis as any;
+  if (g[cacheKey]) return g[cacheKey];
+
+  const baseId = await getBasePeerId();
+  const instanceId = `${baseId}-p${httpPort}`;
+  g[cacheKey] = instanceId;
+
+  // Migrate: update groups whose creatorId matches the base ID (without port suffix)
+  const groupsDir = path.join(process.cwd(), 'data', 'lan-peer', 'groups');
+  try {
+    const entries = await fs.readdir(groupsDir);
+    for (const entry of entries) {
       try {
-        const entries = await fs.readdir(groupsDir);
-        for (const entry of entries) {
-          try {
-            const gFile = path.join(groupsDir, entry, 'group.json');
-            const raw = await fs.readFile(gFile, 'utf8');
-            const group = JSON.parse(raw);
-            if (group.creatorId === oldId) {
-              group.creatorId = newId;
-              await fs.writeFile(gFile, JSON.stringify(group, null, 2), 'utf8');
-              console.log(`[LanPeer] Migrated group ${entry} creatorId: ${oldId} → ${newId}`);
-            }
-          } catch { /* skip */ }
+        const gFile = path.join(groupsDir, entry, 'group.json');
+        const raw = await fs.readFile(gFile, 'utf8');
+        const group = JSON.parse(raw);
+        // Migrate old creatorId (without port suffix) to new format
+        if (group.creatorId && group.creatorId === baseId) {
+          group.creatorId = instanceId;
+          await fs.writeFile(gFile, JSON.stringify(group, null, 2), 'utf8');
+          console.log(`[LanPeer] Migrated group ${entry} creatorId: ${baseId} → ${instanceId}`);
         }
       } catch { /* skip */ }
     }
-  }
+  } catch { /* no groups dir yet */ }
 
-  return newId;
+  return instanceId;
 }
 
 // ========== Singleton ==========

@@ -136,13 +136,16 @@ export class DiscoveryService {
 
   async start(): Promise<void> {
     const dgram = await import('dgram');
-    const { getPrimaryLanIP } = await import('@/lib/utils/network');
+    const { getPrimaryLanIP, getLanBroadcastAddresses, getLanIPs } = await import('@/lib/utils/network');
 
     this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
     this.socket.on('message', (msg: Buffer, rinfo: any) => {
       const payload = parseBroadcast(msg);
-      if (!payload || payload.peerId === this.localPeerId) return;
+      if (!payload) return;
+      if (payload.peerId === this.localPeerId) return; // skip self
+
+      console.log(`[LanPeer Discovery] 收到节点广播: ${payload.peerName} (${payload.ip}:${payload.httpPort}) from ${rinfo.address}:${rinfo.port}`);
 
       this.registry.addPeer({
         id: payload.peerId,
@@ -162,6 +165,15 @@ export class DiscoveryService {
       this.socket.on('error', reject);
     });
 
+    // Log network info for diagnostics
+    const lanIPs = getLanIPs();
+    const broadcastAddrs = getLanBroadcastAddresses();
+    console.log(`[LanPeer Discovery] 本机网络接口:`);
+    for (const info of lanIPs) {
+      console.log(`  - ${info.interface}: ${info.ip} (mask: ${info.netmask}, broadcast: ${info.broadcast})`);
+    }
+    console.log(`[LanPeer Discovery] 广播目标地址: ${broadcastAddrs.join(', ')}`);
+
     // Broadcast self periodically
     const broadcast = () => {
       const ip = getPrimaryLanIP() || '0.0.0.0';
@@ -176,7 +188,11 @@ export class DiscoveryService {
         timestamp: Date.now(),
       };
       const buf = serializeBroadcast(payload);
-      this.socket.send(buf, 0, buf.length, this.udpPort, '255.255.255.255');
+      // Send to all subnet broadcast addresses for better reachability
+      const addrs = getLanBroadcastAddresses();
+      for (const addr of addrs) {
+        this.socket.send(buf, 0, buf.length, this.udpPort, addr);
+      }
     };
 
     broadcast();
@@ -187,7 +203,7 @@ export class DiscoveryService {
       this.registry.checkOffline();
     }, OFFLINE_TIMEOUT / 2);
 
-    console.log(`[LanPeer Discovery] 已启动 UDP 广播 (port ${this.udpPort})`);
+    console.log(`[LanPeer Discovery] 已启动 UDP 广播 (udpPort=${this.udpPort}, wsPort=${this.wsPort}, httpPort=${this.httpPort}, peerId=${this.localPeerId.substring(0, 8)}...)`);
   }
 
   async stop(): Promise<void> {

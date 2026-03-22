@@ -33,6 +33,8 @@ interface FileGridViewProps {
   compact?: boolean;
   /** Download file handler */
   onDownload?: (file: FileItem) => void;
+  /** Read-only mode: hide rename, delete, new file, new folder, upload, copy, move */
+  readOnly?: boolean;
   // Git integration props (context menu only)
   gitInfo?: GitStatusResult;
   onGitStage?: (file: FileItem, action: 'stage' | 'restore' | 'restore-staged') => Promise<void>;
@@ -430,7 +432,7 @@ export function PromptDialog({ title, defaultValue, onConfirm, onCancel }: {
   );
 }
 
-export default function FileGridView({ files, projectId, currentDir = '.', onFileClick, onFolderClick, onRefresh, compact, onDownload, gitInfo, onGitStage, onGitDiff, onGitLog }: FileGridViewProps) {
+export default function FileGridView({ files, projectId, currentDir = '.', onFileClick, onFolderClick, onRefresh, compact, onDownload, readOnly, gitInfo, onGitStage, onGitDiff, onGitLog }: FileGridViewProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: FileItem } | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
@@ -600,7 +602,7 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
       {compact ? (
         <>
           {/* Compact toolbar: new file, new folder, upload */}
-          {projectId && (
+          {projectId && !readOnly && (
             <div className="flex items-center gap-1 px-2.5 py-2 border-b border-white/10 dark:border-white/[0.04] shrink-0">
               <button
                 onClick={handleNewFile}
@@ -762,7 +764,7 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
       )}
 
       {/* Drag overlay */}
-      {isDragOver && (
+      {isDragOver && !readOnly && (
         <div className="absolute inset-0 flex items-center justify-center bg-blue-50/60 dark:bg-blue-900/20 pointer-events-none">
           <div className="flex flex-col items-center gap-2 text-blue-500">
             <Upload size={32} />
@@ -772,7 +774,7 @@ export default function FileGridView({ files, projectId, currentDir = '.', onFil
       )}
 
       {/* Context menu */}
-      {contextMenu && (
+      {contextMenu && !readOnly && (
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}

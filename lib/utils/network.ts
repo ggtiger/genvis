@@ -7,6 +7,8 @@ export interface NetworkInfo {
   ip: string;
   family: 'IPv4' | 'IPv6';
   interface: string;
+  netmask?: string;
+  broadcast?: string;
 }
 
 /**
@@ -34,10 +36,15 @@ export function getLanIPs(): NetworkInfo[] {
         ip.startsWith('10.') ||
         /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)
       ) {
+        // Calculate subnet broadcast address from IP and netmask
+        const netmask = addr.netmask || '255.255.255.0';
+        const broadcast = calculateBroadcast(ip, netmask);
         lanIPs.push({
           ip,
           family: 'IPv4',
           interface: name,
+          netmask,
+          broadcast,
         });
       }
     }
@@ -52,4 +59,27 @@ export function getLanIPs(): NetworkInfo[] {
 export function getPrimaryLanIP(): string | null {
   const lanIPs = getLanIPs();
   return lanIPs.length > 0 ? lanIPs[0].ip : null;
+}
+
+/**
+ * Get all subnet broadcast addresses for LAN interfaces
+ */
+export function getLanBroadcastAddresses(): string[] {
+  const lanIPs = getLanIPs();
+  const addrs = new Set<string>();
+  for (const info of lanIPs) {
+    if (info.broadcast) addrs.add(info.broadcast);
+  }
+  // Always include limited broadcast as fallback
+  addrs.add('255.255.255.255');
+  return Array.from(addrs);
+}
+
+/**
+ * Calculate broadcast address from IP and netmask
+ */
+function calculateBroadcast(ip: string, netmask: string): string {
+  const ipParts = ip.split('.').map(Number);
+  const maskParts = netmask.split('.').map(Number);
+  return ipParts.map((octet, i) => (octet | (~maskParts[i] & 0xff))).join('.');
 }

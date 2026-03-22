@@ -40,6 +40,7 @@ export type PeerMessageType =
   | 'GROUP_MESSAGE'
   | 'GROUP_CREATE'
   | 'GROUP_UPDATE'
+  | 'GROUP_DELETE'
   | 'GROUP_JOIN'
   | 'GROUP_LEAVE'
   | 'SKILL_REQUEST'
