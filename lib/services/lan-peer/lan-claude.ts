@@ -14,6 +14,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import { lanPeerStream } from './lan-peer-stream';
 import { createLanMessage } from './lan-message-service';
 import { updateGroupSession, getGroup } from './chat-service';
@@ -142,19 +143,40 @@ async function buildLanSystemPrompt(groupId: string): Promise<string> {
 
     // Add guidance to use the Skill tool (not just Bash)
     const skillNames = enabledSkills.join('、');
+    const groupWorkspacePath = groupWorkspace(groupId);
+
+    // Build skill paths for AI to use
+    const skillPaths: string[] = [];
+    for (const skillName of enabledSkills) {
+      const userSkillPath = path.join(userSkillsRoot, skillName);
+      const builtinSkillPath = path.join(skillsRoot, skillName);
+      try {
+        fsSync.accessSync(userSkillPath);
+        skillPaths.push(`${skillName}: ${userSkillPath}`);
+      } catch {
+        try {
+          fsSync.accessSync(builtinSkillPath);
+          skillPaths.push(`${skillName}: ${builtinSkillPath}`);
+        } catch {}
+      }
+    }
+
     parts.push(
       `## 技能使用规范\n` +
       `上方已加载以下技能的具体说明：${skillNames}。\n\n` +
-      `**重要**：SKILL.md 中提到的 python3、bash、脚本路径等命令在群聊环境中不可用。` +
-      `你必须使用 Skill 工具来调用技能，而不是直接执行脚本。\n\n` +
+      `**重要**：Skill 工具的返回值 {"success":true,"commandName":"xxx"} 只是确认技能存在，` +
+      `**不是执行结果**。你必须使用 Bash 执行脚本才能真正完成任务。\n\n` +
+      `**群组工作目录**：${groupWorkspacePath}\n` +
+      `所有生成的文件必须输出到这个目录。\n\n` +
+      `**技能路径**：\n${skillPaths.map(p => `- ${p}`).join('\n')}\n\n` +
       `使用方法：\n` +
-      `1. 调用 Skill 工具，skill 参数为技能名称（如 "xlsx"、"baidu-search"）\n` +
-      `2. 在 args 参数中传入自然语言任务描述\n` +
-      `3. 例如：Skill(skill="baidu-search", args="搜索最新AI大模型排名")\n\n` +
-      `禁止事项：\n` +
-      `- 不要用 Bash 执行 python3 命令\n` +
-      `- 不要尝试直接运行 SKILL.md 中的脚本路径\n` +
-      `- 必须通过 Skill 工具来使用技能`
+      `1. 使用技能的完整路径执行脚本\n` +
+      `2. 使用 --output-dir 参数指定输出到群组工作目录\n` +
+      `3. 例如：python3 /技能路径/scripts/generate.py "内容" --output-dir ${groupWorkspacePath}\n\n` +
+      `**关键规则**：\n` +
+      `- Skill 工具只用于确认技能存在，不执行任何操作\n` +
+      `- 必须使用 Bash 执行脚本，使用完整路径\n` +
+      `- 所有输出文件必须保存到群组工作目录`
     );
   }
 
@@ -291,6 +313,8 @@ export async function executeLanClaude(params: ExecuteLanClaudeParams): Promise<
       allowedPaths.push(path.join(skillsRoot, skill));
       allowedPaths.push(path.join(userSkillsRoot, skill));
     }
+    // Also allow the entire user-skills directory for skill execution
+    allowedPaths.push(USER_SKILLS_DIR_ABSOLUTE);
     // Also allow the group's own data directory (for group.json, memory, etc.)
     const groupDataDir = path.join(DATA_DIR, groupId);
     allowedPaths.push(groupDataDir);
@@ -591,15 +615,15 @@ export async function executeLanClaude(params: ExecuteLanClaudeParams): Promise<
     // Use 'default' permissionMode so the SDK properly registers all tools including Skill.
     // canUseTool callback auto-approves all non-blocked tools (returns 'allow').
     // This ensures Skill tool is available when plugins are loaded.
-    // IMPORTANT: Use USER_SKILLS_DIR_ABSOLUTE as cwd so SDK can find skills correctly.
-    // The workspace is added to additionalDirectories for file access.
+    // IMPORTANT: Use workspace as cwd so generated files go to the right place.
+    // Skill paths are provided in system prompt with full paths.
     const hasPlugins = plugins.length > 0;
-    console.log(`[LanClaude] 🚀 SDK query() options: { cwd: ${USER_SKILLS_DIR_ABSOLUTE}, plugins: ${hasPlugins ? plugins.length : 'none'}, allowedTools: ${hasPlugins ? 'yes' : 'none'}, settingSources: ${hasPlugins ? 'project' : 'none'}, model: ${finalModel} }`);
+    console.log(`[LanClaude] 🚀 SDK query() options: { cwd: ${workspace}, plugins: ${hasPlugins ? plugins.length : 'none'}, allowedTools: ${hasPlugins ? 'yes' : 'none'}, settingSources: ${hasPlugins ? 'project' : 'none'}, model: ${finalModel} }`);
     const response = query({
       prompt: instruction,
       options: {
-        cwd: USER_SKILLS_DIR_ABSOLUTE, // Use user-skills dir so SDK can find skills
-        additionalDirectories: allowedPaths, // Include workspace for file operations
+        cwd: workspace, // Use workspace so files are generated in the right place
+        additionalDirectories: allowedPaths, // Include skill directories for access
         model: finalModel,
         resume: sessionId,
         permissionMode: 'default',
