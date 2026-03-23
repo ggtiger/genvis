@@ -66,7 +66,7 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
           <span>{copied ? '已复制' : '复制'}</span>
         </button>
       </div>
-      <pre className="bg-gray-900 text-gray-100 p-3 overflow-x-auto text-xs leading-5 m-0">{children}</pre>
+      <pre className="bg-gray-900 text-gray-100 p-3 overflow-x-auto text-xs leading-5 m-0 whitespace-pre-wrap break-words max-w-full">{children}</pre>
     </div>
   );
 }
@@ -188,11 +188,11 @@ function ToolResultBlock({ icon: Icon, label, color, bgClass, borderClass, toolN
   const hasContent = !!content.trim();
 
   return (
-    <div className="flex gap-2.5 max-w-2xl ml-11">
-      <div className="flex-1 min-w-0">
+    <div className="flex gap-2.5 ml-10 mr-2 overflow-hidden">
+      <div className="flex-1 min-w-0 max-w-full">
         <button
           onClick={() => hasContent && setExpanded(!expanded)}
-          className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${bgClass} ${borderClass} ${hasContent ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+          className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors overflow-hidden ${bgClass} ${borderClass} ${hasContent ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
         >
           {hasContent ? (
             expanded
@@ -203,9 +203,9 @@ function ToolResultBlock({ icon: Icon, label, color, bgClass, borderClass, toolN
           )}
           <Icon className={`w-4 h-4 shrink-0 ${color}`} />
           <span className={`text-xs font-medium ${color}`}>{label}</span>
-          <span className="text-[10px] px-1.5 py-0.5 bg-black/5 dark:bg-white/10 rounded font-mono">{toolName}</span>
+          <span className="text-[10px] px-1.5 py-0.5 bg-black/5 dark:bg-white/10 rounded font-mono shrink-0">{toolName}</span>
           {filePath && (
-            <span className="text-[10px] text-text-secondary font-mono truncate" title={filePath}>
+            <span className="text-[10px] text-text-secondary font-mono truncate min-w-0" title={filePath}>
               {truncatePath(filePath)}
             </span>
           )}
@@ -213,7 +213,7 @@ function ToolResultBlock({ icon: Icon, label, color, bgClass, borderClass, toolN
         </button>
         {expanded && hasContent && (
           <div className={`mt-1 p-2 rounded-lg border ${bgClass} ${borderClass} max-h-60 overflow-y-auto`}>
-            <pre className={`text-[11px] font-mono whitespace-pre-wrap break-all ${isError ? 'text-red-600 dark:text-red-400' : 'text-text-main'}`}>
+            <pre className={`text-[11px] font-mono whitespace-pre-wrap break-words ${isError ? 'text-red-600 dark:text-red-400' : 'text-text-main'}`}>
               {content}
             </pre>
           </div>
@@ -278,14 +278,14 @@ export default function ChatMessageBubble({ message, isStreaming, localPeerId }:
     const Icon = cfg.icon;
 
     return (
-      <div className="flex gap-2.5 max-w-2xl ml-11">
-        <div className="flex-1 min-w-0">
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${cfg.bgClass} ${cfg.borderClass}`}>
+      <div className="flex gap-2.5 ml-10 mr-2 overflow-hidden">
+        <div className="flex-1 min-w-0 max-w-full">
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border overflow-hidden flex-wrap ${cfg.bgClass} ${cfg.borderClass}`}>
             <Icon className={`w-4 h-4 shrink-0 ${cfg.color}`} />
             <span className={`text-xs font-medium ${cfg.color}`}>{cfg.label}</span>
-            <span className="text-[10px] px-1.5 py-0.5 bg-black/5 dark:bg-white/10 rounded font-mono">{toolName}</span>
+            <span className="text-[10px] px-1.5 py-0.5 bg-black/5 dark:bg-white/10 rounded font-mono shrink-0">{toolName}</span>
             {filePath && (
-              <span className="text-[10px] text-text-secondary font-mono truncate" title={filePath}>
+              <span className="text-[10px] text-text-secondary font-mono truncate min-w-0" title={filePath}>
                 {truncatePath(filePath)}
               </span>
             )}
@@ -325,7 +325,7 @@ export default function ChatMessageBubble({ message, isStreaming, localPeerId }:
   const time = new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
   return (
-    <div className={`flex gap-3 max-w-3xl group ${isSelf ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}>
+    <div className={`flex gap-3 max-w-3xl group overflow-hidden ${isSelf ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}>
       {/* Avatar */}
       <div className="shrink-0">
         <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium shadow-sm ${
@@ -361,7 +361,7 @@ export default function ChatMessageBubble({ message, isStreaming, localPeerId }:
             <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/10 text-purple-500 dark:text-purple-400 rounded-md">技能调用</span>
           )}
         </div>
-        <div className={`p-3.5 text-sm leading-relaxed break-words ${
+        <div className={`p-3.5 text-sm leading-relaxed break-words overflow-hidden max-w-full ${
           isSelf
             ? 'bg-primary text-white rounded-2xl rounded-tr-none shadow-lg shadow-primary/20'
             : isAI

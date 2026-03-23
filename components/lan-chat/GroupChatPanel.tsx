@@ -701,7 +701,7 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
       <div className="flex flex-1 overflow-hidden">
         {/* Messages */}
         <div className="flex-1 flex flex-col">
-          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          <div ref={messagesContainerRef} className="flex-1 overflow-auto px-5 py-4 space-y-3">
             {hasMore && (
               <div className="flex justify-center py-2">
                 <button
