@@ -435,10 +435,24 @@ else
     export NOTARIZE=false
 fi
 
-info "Running: electron-builder --mac --$ARCH --publish $PUBLISH_FLAG"
-info "This may take several minutes, please wait..."
+# 判断构建目标：ARM64 交叉编译 x64 时 hdiutil 无法创建 DMG，只产出 ZIP
+CURRENT_ARCH=$(uname -m)
+if [ "$CURRENT_ARCH" = "arm64" ] && [ "$ARCH" = "x64" ]; then
+    MAC_TARGETS="zip"
+    warning "Cross-compiling x64 on ARM64: DMG creation not supported, building ZIP only"
+else
+    MAC_TARGETS="${MAC_TARGETS:-default}"
+fi
 
-npx electron-builder --mac --$ARCH --publish $PUBLISH_FLAG
+if [ "$MAC_TARGETS" = "default" ] || [ -z "$MAC_TARGETS" ]; then
+    info "Running: electron-builder --mac --$ARCH --publish $PUBLISH_FLAG"
+    info "This may take several minutes, please wait..."
+    npx electron-builder --mac --$ARCH --publish $PUBLISH_FLAG
+else
+    info "Running: electron-builder --mac $MAC_TARGETS --$ARCH --publish $PUBLISH_FLAG"
+    info "This may take several minutes, please wait..."
+    npx electron-builder --mac $MAC_TARGETS --$ARCH --publish $PUBLISH_FLAG
+fi
 
 if [ $? -ne 0 ]; then
     error "Electron packaging failed"
