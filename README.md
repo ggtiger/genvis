@@ -16,7 +16,7 @@
 
 ---
 
-> **[!IMPORTANT]**
+> **🌞🌞🌞**
 > 本项目基于 [ImGoodBai/goodable](https://github.com/ImGoodBai/goodable) 魔改而来，感谢原作者的开源贡献！
 
 ---
