@@ -36,13 +36,20 @@ exports.default = async function afterSign(context) {
 
   try {
     const { notarize } = require('@electron/notarize');
-    await notarize({
+
+    // 15 分钟超时保护，避免凭证错误导致无限等待
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Notarization timed out after 15 minutes')), 15 * 60 * 1000)
+    );
+    const notarizeTask = notarize({
       tool: 'notarytool',
       appPath,
       appleId,
       appleIdPassword,
       teamId,
     });
+
+    await Promise.race([notarizeTask, timeout]);
     console.log('[afterSign] Notarization complete!');
   } catch (err) {
     console.error('[afterSign] Notarization failed:', err.message);
