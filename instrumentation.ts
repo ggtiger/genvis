@@ -89,8 +89,8 @@ async function killStaleSkillProcesses(): Promise<void> {
   if (process.platform === 'win32') return;
 
   try {
-    const { execSync } = await import('child_process');
-    const path = await import('path');
+    const { execSync } = await import(/* webpackIgnore: true */ 'child_process');
+    const path = await import(/* webpackIgnore: true */ 'path');
 
     const skillsDirs = [
       path.join(process.cwd(), 'skills'),
