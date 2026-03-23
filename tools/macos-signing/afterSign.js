@@ -15,8 +15,13 @@ const fs = require('fs');
 
 /** Resolve signing identity from env or keychain */
 function resolveIdentity() {
-  if (process.env.CSC_NAME) return process.env.CSC_NAME;
+  // APPLE_IDENTITY has the full name (e.g. "Developer ID Application: hu wang (...)")
   if (process.env.APPLE_IDENTITY) return process.env.APPLE_IDENTITY;
+  // CSC_NAME may not have the prefix, prepend if missing
+  if (process.env.CSC_NAME) {
+    const name = process.env.CSC_NAME;
+    return name.startsWith('Developer ID') ? name : `Developer ID Application: ${name}`;
+  }
 
   // Auto-detect from keychain
   try {

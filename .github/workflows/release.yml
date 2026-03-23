@@ -69,8 +69,12 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           rm -f $RUNNER_TEMP/certificate.p12
           # 导出证书名称，供 afterSign.js 使用
+          # 提取完整证书名 (如 "Developer ID Application: hu wang (G4Q74DQW93)")
           CERT_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Developer ID Application' | head -1 | sed 's/.*"\(.*\)"/\1/')
-          echo "MACOS_CERT_IDENTITY=$CERT_IDENTITY" >> $GITHUB_ENV
+          echo "APPLE_IDENTITY=$CERT_IDENTITY" >> $GITHUB_ENV
+          # electron-builder 要求不带 "Developer ID Application:" 前缀
+          CSC_SHORT=$(echo "$CERT_IDENTITY" | sed 's/Developer ID Application: //')
+          echo "MACOS_CSC_NAME=$CSC_SHORT" >> $GITHUB_ENV
           echo "Imported cert: $CERT_IDENTITY"
 
       - name: Build (ARM64)
@@ -82,8 +86,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-          # afterSign.js 使用此识别名称对 node-runtime 进行额外签名
-          CSC_NAME: ${{ env.MACOS_CERT_IDENTITY }}
+          # electron-builder 签名（不带前缀）
+          CSC_NAME: ${{ env.MACOS_CSC_NAME }}
+          # afterSign.js codesign 使用完整证书名
+          APPLE_IDENTITY: ${{ env.APPLE_IDENTITY }}
           # 公证所需凭证
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
@@ -164,8 +170,12 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           rm -f $RUNNER_TEMP/certificate.p12
           # 导出证书名称，供 afterSign.js 使用
+          # 提取完整证书名 (如 "Developer ID Application: hu wang (G4Q74DQW93)")
           CERT_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Developer ID Application' | head -1 | sed 's/.*"\(.*\)"/\1/')
-          echo "MACOS_CERT_IDENTITY=$CERT_IDENTITY" >> $GITHUB_ENV
+          echo "APPLE_IDENTITY=$CERT_IDENTITY" >> $GITHUB_ENV
+          # electron-builder 要求不带 "Developer ID Application:" 前缀
+          CSC_SHORT=$(echo "$CERT_IDENTITY" | sed 's/Developer ID Application: //')
+          echo "MACOS_CSC_NAME=$CSC_SHORT" >> $GITHUB_ENV
           echo "Imported cert: $CERT_IDENTITY"
 
       - name: Build (x64)
@@ -177,8 +187,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-          # afterSign.js 使用此识别名称对 node-runtime 进行额外签名
-          CSC_NAME: ${{ env.MACOS_CERT_IDENTITY }}
+          # electron-builder 签名（不带前缀）
+          CSC_NAME: ${{ env.MACOS_CSC_NAME }}
+          # afterSign.js codesign 使用完整证书名
+          APPLE_IDENTITY: ${{ env.APPLE_IDENTITY }}
           # 公证所需凭证
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
