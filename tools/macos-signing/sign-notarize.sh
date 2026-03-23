@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # 配置
-CERT_NAME="Developer ID Application: Shaoxing handy Intelligent Technology Co,Ltd (G4Q74DQW93)"
+CERT_NAME="Developer ID Application: hu wang (G4Q74DQW93)"
 NOTARY_PROFILE="genvis-notary"
 TEAM_ID="G4Q74DQW93"
 

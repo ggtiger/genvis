@@ -113,7 +113,7 @@ jobs:
   # ──────────────────────────────────────────────────────
   build-mac-x64:
     name: Build macOS x64
-    runs-on: macos-13  # GitHub 最后一代 Intel x64 runner
+    runs-on: macos-14  # Apple Silicon runner，通过 Rosetta 交叉编译 x64
 
     steps:
       - name: Checkout
