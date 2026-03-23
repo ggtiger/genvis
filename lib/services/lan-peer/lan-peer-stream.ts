@@ -64,9 +64,9 @@ class LanPeerStreamManager {
       for (const c of dead) this.removeConnection(c);
     }
 
-    // Forward ai_stream_* events to peers via registered broadcast callback
+    // Forward ai_stream_* and ai_tool_* events to peers via registered broadcast callback
     const groupId = (event.data as any)?.groupId;
-    if (groupId && event.type.startsWith('ai_stream_')) {
+    if (groupId && (event.type.startsWith('ai_stream_') || event.type.startsWith('ai_tool_'))) {
       const cb = this.broadcastCallbacks.get(groupId);
       if (cb) {
         try { cb(event); } catch (err) {

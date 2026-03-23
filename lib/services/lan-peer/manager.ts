@@ -194,13 +194,24 @@ export class LanPeerManager {
           const { touchGroupTimestamp } = await import('./chat-service');
           touchGroupTimestamp(chatMsg.groupId).catch(() => {});
 
-          // If this node is the group creator and the message is a user text message,
-          // trigger AI reply on behalf of the remote sender.
-          // skill_invoke mode also triggers AI — skills are loaded as SDK plugins.
-          if (chatMsg.senderId !== 'ai-assistant' && chatMsg.messageType === 'text'
-              && chatMsg.interactionMode !== 'no_ai') {
-            const group = await getGroup(chatMsg.groupId);
-            if (group?.creatorId === this.peerId) {
+          // If this node is the group creator, relay the message to other members.
+          // Non-group-owners may not have direct WebSocket connections to each other,
+          // so the group owner acts as a relay hub to ensure all members receive it.
+          const group = await getGroup(chatMsg.groupId);
+          if (group?.creatorId === this.peerId) {
+            // Relay to all members except the original sender and ourselves
+            const relayTargets = (group.members || []).filter(
+              (id: string) => id !== this.peerId && id !== fromPeerId && id !== chatMsg.senderId
+            );
+            if (relayTargets.length > 0) {
+              for (const targetId of relayTargets) {
+                this.transport.send(targetId, msg);
+              }
+            }
+
+            // Trigger AI reply for user text messages
+            if (chatMsg.senderId !== 'ai-assistant' && chatMsg.messageType === 'text'
+                && chatMsg.interactionMode !== 'no_ai') {
               this.triggerAIReply(chatMsg.groupId, chatMsg).catch((err) => {
                 console.error('[LanPeer] AI reply for peer message failed:', err);
               });
