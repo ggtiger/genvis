@@ -46,12 +46,14 @@ jobs:
           PREVIEW_PORT_END=3999
           DATABASE_URL="file:./data/prod.db"
           EOF
+          # 去除 heredoc 缩进产生的前导空格
+          sed -i '' 's/^[[:space:]]*//' .env
 
       - name: TypeScript type check
         run: npm run type-check
 
       - name: Import macOS signing certificate
-        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        if: env.MACOS_CERTIFICATE != ''
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
@@ -96,16 +98,22 @@ jobs:
             dist/*.dmg.blockmap
             dist/*.zip
             dist/*.zip.blockmap
-            dist/latest-mac.yml
           retention-days: 3
           compression-level: 0
+
+      - name: Upload ARM64 update manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-mac-arm64
+          path: dist/latest-mac.yml
+          retention-days: 3
 
   # ──────────────────────────────────────────────────────
   # Job 2: macOS x64 (Intel) 构建
   # ──────────────────────────────────────────────────────
   build-mac-x64:
     name: Build macOS x64
-    runs-on: macos-15-intel  # Intel x64 runner
+    runs-on: macos-13  # GitHub 最后一代 Intel x64 runner
 
     steps:
       - name: Checkout
@@ -133,12 +141,14 @@ jobs:
           PREVIEW_PORT_END=3999
           DATABASE_URL="file:./data/prod.db"
           EOF
+          # 去除 heredoc 缩进产生的前导空格
+          sed -i '' 's/^[[:space:]]*//' .env
 
       - name: TypeScript type check
         run: npm run type-check
 
       - name: Import macOS signing certificate
-        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        if: env.MACOS_CERTIFICATE != ''
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
@@ -183,9 +193,15 @@ jobs:
             dist/*.dmg.blockmap
             dist/*.zip
             dist/*.zip.blockmap
-            dist/latest-mac.yml
           retention-days: 3
           compression-level: 0
+
+      - name: Upload x64 update manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-mac-x64
+          path: dist/latest-mac.yml
+          retention-days: 3
 
   # ──────────────────────────────────────────────────────
   # Job 3: Windows x64 构建
@@ -279,13 +295,75 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download all artifacts
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-files
-          # 下载所有 release-* 前缀的 artifacts
           pattern: release-*
-          merge-multiple: true  # 合并到同一目录，方便上传
+          merge-multiple: true
+
+      - name: Download ARM64 update manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: latest-mac-arm64
+          path: manifests/arm64
+
+      - name: Download x64 update manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: latest-mac-x64
+          path: manifests/x64
+
+      - name: Download Windows update manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: release-windows-x64
+          path: manifests/win
+
+      - name: Merge latest-mac.yml (combine ARM64 + x64 entries)
+        run: |
+          pip install pyyaml
+
+          echo "=== ARM64 manifest ==="
+          cat manifests/arm64/latest-mac.yml
+          echo ""
+          echo "=== x64 manifest ==="
+          cat manifests/x64/latest-mac.yml
+          echo ""
+
+          # ARM64 manifest 作为基础，提取 x64 的 files 条目追加到后面
+          # latest-mac.yml 格式是 YAML，files: 数组包含所有架构的文件
+          # 简单策略：从 x64 yml 中提取 "  - url:" 开头的文件块，追加到 arm64 yml
+          python3 - << 'PYEOF'
+          import yaml, sys
+
+          with open('manifests/arm64/latest-mac.yml') as f:
+              arm64 = yaml.safe_load(f)
+          with open('manifests/x64/latest-mac.yml') as f:
+              x64 = yaml.safe_load(f)
+
+          # 合并 files 列表
+          all_files = arm64.get('files', [])
+          x64_files = x64.get('files', [])
+          existing_urls = {f.get('url') for f in all_files}
+          for f in x64_files:
+              if f.get('url') not in existing_urls:
+                  all_files.append(f)
+          arm64['files'] = all_files
+
+          with open('release-files/latest-mac.yml', 'w') as f:
+              yaml.dump(arm64, f, default_flow_style=False, allow_unicode=True)
+
+          print('=== Merged latest-mac.yml ===')
+          with open('release-files/latest-mac.yml') as f:
+              print(f.read())
+          PYEOF
+
+      - name: Copy Windows manifest
+        run: |
+          if [ -f manifests/win/latest.yml ]; then
+            cp manifests/win/latest.yml release-files/latest.yml
+          fi
 
       - name: List release files
         run: |
