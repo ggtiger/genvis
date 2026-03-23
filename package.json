@@ -1,6 +1,6 @@
 {
   "name": "genvis",
-  "version": "0.1.7",
+  "version": "0.1.9",
   "description": "AI-Powered Web App Builder - Build apps with natural language using Claude Code, Cursor, and more",
   "private": true,
   "main": "electron/main.js",
