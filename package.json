@@ -264,6 +264,7 @@
         "to": "icon.png"
       }
     ],
+    "afterPack": "tools/macos-signing/afterPack.js",
     "afterSign": "tools/macos-signing/afterSign.js",
     "asar": true,
     "directories": {
