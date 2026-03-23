@@ -9,15 +9,15 @@
 # 首次使用前需要配置 Apple ID 凭证：
 # xcrun notarytool store-credentials "genvis-notary" \
 #   --apple-id "你的AppleID邮箱" \
-#   --team-id "3HNQ22G6W5" \
+#   --team-id "G4Q74DQW93" \
 #   --password "App专用密码(在appleid.apple.com生成)"
 
 set -euo pipefail
 
 # 配置
-CERT_NAME="Developer ID Application: Shaoxing handy Intelligent Technology Co,Ltd (3HNQ22G6W5)"
+CERT_NAME="Developer ID Application: Shaoxing handy Intelligent Technology Co,Ltd (G4Q74DQW93)"
 NOTARY_PROFILE="genvis-notary"
-TEAM_ID="3HNQ22G6W5"
+TEAM_ID="G4Q74DQW93"
 
 # 获取脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

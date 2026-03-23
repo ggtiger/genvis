@@ -415,10 +415,30 @@ fi
 # Step 7: Electron packaging
 step "7/8" "Electron Packaging (macOS DMG & ZIP)"
 
-info "Running: electron-builder --mac --$ARCH --publish never"
+# 如果设置了 GH_TOKEN 且处于 CI 环境，使用 --publish always 生成 latest-mac.yml 更新清单
+# 本地开发时使用 --publish never 避免意外发布
+if [ -n "$GH_TOKEN" ] && [ "$CI" = "true" ]; then
+    PUBLISH_FLAG="always"
+    info "CI mode: using --publish always (will generate latest-mac.yml)"
+else
+    PUBLISH_FLAG="never"
+    info "Local mode: using --publish never"
+fi
+
+# 公证控制：有 APPLE_ID + APPLE_TEAM_ID + APPLE_APP_SPECIFIC_PASSWORD 时才开启
+# electron-builder 内置 notarize=true 已关闭，改为通过环境变量动态控制
+if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$CSC_LINK" ]; then
+    info "Notarization enabled (APPLE_ID + APPLE_TEAM_ID detected)"
+    export NOTARIZE=true
+else
+    info "Notarization disabled (APPLE_ID / CSC_LINK not set)"
+    export NOTARIZE=false
+fi
+
+info "Running: electron-builder --mac --$ARCH --publish $PUBLISH_FLAG"
 info "This may take several minutes, please wait..."
 
-npx electron-builder --mac --$ARCH --publish never
+npx electron-builder --mac --$ARCH --publish $PUBLISH_FLAG
 
 if [ $? -ne 0 ]; then
     error "Electron packaging failed"

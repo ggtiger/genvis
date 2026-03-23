@@ -1,0 +1,324 @@
+name: Release
+
+# 统一发布工作流：等待三个平台构建完成后，汇总所有产物到一个 GitHub Release
+# 触发方式：推送 v* 标签（如 git tag v1.2.0 && git push origin v1.2.0）
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 必须有写入权限才能创建 Release
+permissions:
+  contents: write
+
+jobs:
+  # ──────────────────────────────────────────────────────
+  # Job 1: macOS ARM64 构建
+  # ──────────────────────────────────────────────────────
+  build-mac-arm64:
+    name: Build macOS ARM64
+    runs-on: macos-latest  # GitHub 托管的 Apple Silicon runner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup .env
+        run: |
+          cat > .env << 'EOF'
+          NODE_ENV=production
+          PROJECTS_DIR=./data/projects
+          PORT=3000
+          WEB_PORT=3000
+          PREVIEW_PORT_START=3100
+          PREVIEW_PORT_END=3999
+          DATABASE_URL="file:./data/prod.db"
+          EOF
+
+      - name: TypeScript type check
+        run: npm run type-check
+
+      - name: Import macOS signing certificate
+        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 -P "$MACOS_CERTIFICATE_PWD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          rm -f $RUNNER_TEMP/certificate.p12
+          # 导出证书名称，供 afterSign.js 使用
+          CERT_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Developer ID Application' | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "MACOS_CERT_IDENTITY=$CERT_IDENTITY" >> $GITHUB_ENV
+          echo "Imported cert: $CERT_IDENTITY"
+
+      - name: Build (ARM64)
+        run: |
+          chmod +x ./tools/build-mac2.sh
+          ./tools/build-mac2.sh --arch arm64 --skip-type-check --skip-test
+        env:
+          CI: 'true'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          # afterSign.js 使用此识别名称对 node-runtime 进行额外签名
+          CSC_NAME: ${{ env.MACOS_CERT_IDENTITY }}
+          # 公证所需凭证
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload ARM64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-mac-arm64
+          path: |
+            dist/*.dmg
+            dist/*.dmg.blockmap
+            dist/*.zip
+            dist/*.zip.blockmap
+            dist/latest-mac.yml
+          retention-days: 3
+          compression-level: 0
+
+  # ──────────────────────────────────────────────────────
+  # Job 2: macOS x64 (Intel) 构建
+  # ──────────────────────────────────────────────────────
+  build-mac-x64:
+    name: Build macOS x64
+    runs-on: macos-15-intel  # Intel x64 runner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup .env
+        run: |
+          cat > .env << 'EOF'
+          NODE_ENV=production
+          PROJECTS_DIR=./data/projects
+          PORT=3000
+          WEB_PORT=3000
+          PREVIEW_PORT_START=3100
+          PREVIEW_PORT_END=3999
+          DATABASE_URL="file:./data/prod.db"
+          EOF
+
+      - name: TypeScript type check
+        run: npm run type-check
+
+      - name: Import macOS signing certificate
+        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 -P "$MACOS_CERTIFICATE_PWD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          rm -f $RUNNER_TEMP/certificate.p12
+          # 导出证书名称，供 afterSign.js 使用
+          CERT_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Developer ID Application' | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "MACOS_CERT_IDENTITY=$CERT_IDENTITY" >> $GITHUB_ENV
+          echo "Imported cert: $CERT_IDENTITY"
+
+      - name: Build (x64)
+        run: |
+          chmod +x ./tools/build-mac2.sh
+          ./tools/build-mac2.sh --arch x64 --skip-type-check --skip-test
+        env:
+          CI: 'true'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          # afterSign.js 使用此识别名称对 node-runtime 进行额外签名
+          CSC_NAME: ${{ env.MACOS_CERT_IDENTITY }}
+          # 公证所需凭证
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload x64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-mac-x64
+          path: |
+            dist/*.dmg
+            dist/*.dmg.blockmap
+            dist/*.zip
+            dist/*.zip.blockmap
+            dist/latest-mac.yml
+          retention-days: 3
+          compression-level: 0
+
+  # ──────────────────────────────────────────────────────
+  # Job 3: Windows x64 构建
+  # ──────────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup .env
+        shell: pwsh
+        run: |
+          @"
+          NODE_ENV=production
+          PROJECTS_DIR=./data/projects
+          PORT=3000
+          WEB_PORT=3000
+          PREVIEW_PORT_START=3100
+          PREVIEW_PORT_END=3999
+          DATABASE_URL="file:./data/prod.db"
+          "@ | Out-File -FilePath .env -Encoding utf8
+
+      - name: TypeScript type check
+        run: npm run type-check
+
+      - name: Cache Git Runtime
+        id: cache-git-runtime
+        uses: actions/cache@v4
+        with:
+          path: git-runtime/win32-x64
+          key: git-runtime-win32-x64-2.47.1-trimmed-${{ hashFiles('scripts/build-git-runtime.ps1', 'scripts/trim-git-runtime.ps1') }}
+
+      - name: Build Git Runtime
+        if: steps.cache-git-runtime.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\scripts\build-git-runtime.ps1
+
+      - name: Trim Git Runtime
+        if: steps.cache-git-runtime.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\scripts\trim-git-runtime.ps1 -SkipBackup
+
+      - name: Verify Git Runtime
+        shell: pwsh
+        run: |
+          $gitExe = "git-runtime\win32-x64\cmd\git.exe"
+          if (-not (Test-Path $gitExe)) { Write-Error "git.exe not found"; exit 1 }
+          Write-Host "Git Runtime OK: $(& $gitExe --version)"
+
+      - name: Build Windows package
+        shell: pwsh
+        run: .\tools\build-windows.ps1 -SkipTypeCheck
+        env:
+          CI: 'true'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Windows 代码签名证书（可选，不配置则不签名）
+          WIN_CSC_LINK: ${{ secrets.WIN_CERTIFICATE }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CERTIFICATE_PWD }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
+          retention-days: 3
+          compression-level: 6
+
+  # ──────────────────────────────────────────────────────
+  # Job 4: 汇总所有平台，创建统一 GitHub Release
+  # ──────────────────────────────────────────────────────
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-mac-arm64, build-mac-x64, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          # 下载所有 release-* 前缀的 artifacts
+          pattern: release-*
+          merge-multiple: true  # 合并到同一目录，方便上传
+
+      - name: List release files
+        run: |
+          echo "=== Files to release ==="
+          find release-files -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 自动从 commit messages 生成 Release Notes
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-rc') }}
+          files: |
+            release-files/*.dmg
+            release-files/*.dmg.blockmap
+            release-files/*.zip
+            release-files/*.zip.blockmap
+            release-files/*.exe
+            release-files/*.exe.blockmap
+            release-files/latest-mac.yml
+            release-files/latest.yml
+          # Release 说明头部，下面跟 auto-generated notes
+          body: |
+            ## 下载说明
+
+            | 平台 | 文件 | 说明 |
+            |---|---|---|
+            | macOS (Apple Silicon) | `*-arm64-mac.dmg` | M1/M2/M3 芯片 |
+            | macOS (Intel) | `*-x64-mac.dmg` | Intel 芯片 |
+            | Windows | `*-Setup-*.exe` | Windows 10/11 x64 |
+
+            > `latest-mac.yml` / `latest.yml` 是应用内自动更新所需的清单文件，无需手动下载。
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

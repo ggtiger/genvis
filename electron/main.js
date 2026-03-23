@@ -8,6 +8,20 @@ const https = require('https');
 const net = require('net');
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
+// Auto updater (only in production)
+let autoUpdater = null;
+if (!isDev) {
+  try {
+    autoUpdater = require('electron-updater').autoUpdater;
+    autoUpdater.autoDownload = false; // 手动触发下载，控制更好
+    autoUpdater.autoInstallOnAppQuit = true; // 退出时自动安装
+    autoUpdater.logger = require('electron-log');
+    autoUpdater.logger.transports.file.level = 'info';
+  } catch (e) {
+    console.warn('[Updater] electron-updater not available:', e.message);
+  }
+}
+
 // Crash monitoring
 const crashMonitor = require('./crash-monitor');
 
@@ -880,6 +894,66 @@ function registerNavigationEvents(window) {
 
 // ==================== IPC 处理器 ====================
 
+function setupAutoUpdater() {
+  if (!autoUpdater) return;
+
+  // 有新版本可用
+  autoUpdater.on('update-available', (info) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater-event', {
+        type: 'update-available',
+        version: info.version,
+        releaseNotes: info.releaseNotes || '',
+        releaseDate: info.releaseDate,
+      });
+    }
+  });
+
+  // 已是最新版本
+  autoUpdater.on('update-not-available', (info) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater-event', {
+        type: 'update-not-available',
+        version: info.version,
+      });
+    }
+  });
+
+  // 下载进度
+  autoUpdater.on('download-progress', (progress) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater-event', {
+        type: 'download-progress',
+        percent: Math.round(progress.percent),
+        transferred: progress.transferred,
+        total: progress.total,
+        bytesPerSecond: progress.bytesPerSecond,
+      });
+    }
+  });
+
+  // 下载完成
+  autoUpdater.on('update-downloaded', (info) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater-event', {
+        type: 'update-downloaded',
+        version: info.version,
+      });
+    }
+  });
+
+  // 错误
+  autoUpdater.on('error', (err) => {
+    console.error('[Updater] Error:', err.message);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater-event', {
+        type: 'error',
+        message: err.message,
+      });
+    }
+  });
+}
+
 function registerIpcHandlers() {
   ipcMain.handle('ping', async () => 'pong');
 
@@ -1252,6 +1326,39 @@ function registerIpcHandlers() {
       return { success: false, error: error.message };
     }
   });
+
+  // ==================== 更新相关 IPC ====================
+
+  // 获取当前版本
+  ipcMain.handle('get-app-version', () => APP_VERSION);
+
+  // 检查更新
+  ipcMain.handle('check-for-updates', async () => {
+    if (!autoUpdater) return { available: false, reason: 'updater-not-available' };
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      return { available: !!result, info: result?.updateInfo || null };
+    } catch (err) {
+      return { available: false, error: err.message };
+    }
+  });
+
+  // 开始下载更新
+  ipcMain.handle('download-update', async () => {
+    if (!autoUpdater) return { success: false, reason: 'updater-not-available' };
+    try {
+      await autoUpdater.downloadUpdate();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // 退出并安装
+  ipcMain.handle('quit-and-install', () => {
+    if (!autoUpdater) return;
+    autoUpdater.quitAndInstall(false, true);
+  });
 }
 
 function setupSingleInstanceLock() {
@@ -1362,7 +1469,18 @@ if (setupSingleInstanceLock()) {
       console.log('[INFO] Preview cache disabled for ports 3100-3999');
 
       registerIpcHandlers();
-      return createMainWindow();
+      setupAutoUpdater();
+      return createMainWindow().then((win) => {
+        // 启动后延迟 10s 自动检查更新（等主窗口加载完成）
+        if (autoUpdater && win) {
+          setTimeout(() => {
+            autoUpdater.checkForUpdates().catch((e) =>
+              console.warn('[Updater] Background check failed:', e.message)
+            );
+          }, 10000);
+        }
+        return win;
+      });
     })
     .catch((error) => {
       console.error('❌ An error occurred while initializing the Electron app.');

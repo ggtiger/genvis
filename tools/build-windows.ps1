@@ -454,10 +454,20 @@ foreach ($nulPath in $nulPaths) {
 
 Write-Step "6/6" "Electron Packaging (Windows NSIS)"
 
-Write-Info "Running: electron-builder --win --publish never"
+# CI 环境下使用 --publish always 生成 latest.yml 更新清单
+# 本地开发使用 --publish never 避免意外发布
+if ($env:GH_TOKEN -and $env:CI -eq 'true') {
+    $publishFlag = 'always'
+    Write-Info "CI mode: using --publish always (will generate latest.yml)"
+} else {
+    $publishFlag = 'never'
+    Write-Info "Local mode: using --publish never"
+}
+
+Write-Info "Running: electron-builder --win --publish $publishFlag"
 Write-Info "This may take several minutes, please wait..."
 
-npx electron-builder --win --publish never
+npx electron-builder --win --publish $publishFlag
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Electron packaging failed with exit code $LASTEXITCODE"

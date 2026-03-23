@@ -13,6 +13,25 @@ contextBridge.exposeInMainWorld('desktopAPI', {
     return versionArg ? versionArg.split('=')[1] : 'Unknown';
   },
 
+  // 应用内升级 API
+  updater: {
+    // 获取当前版本（通过 IPC 保证准确）
+    getVersion: () => ipcRenderer.invoke('get-app-version'),
+    // 手动检查更新
+    checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+    // 开始下载更新包
+    downloadUpdate: () => ipcRenderer.invoke('download-update'),
+    // 安装并重启
+    quitAndInstall: () => ipcRenderer.invoke('quit-and-install'),
+    // 监听更新事件（update-available / update-not-available / download-progress / update-downloaded / error）
+    onEvent: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const handler = (event, data) => callback(data);
+      ipcRenderer.on('updater-event', handler);
+      return () => ipcRenderer.removeListener('updater-event', handler);
+    },
+  },
+
   // 窗口控制API
   windowControls: {
     minimize: () => ipcRenderer.invoke('window-control', { action: 'minimize' }),

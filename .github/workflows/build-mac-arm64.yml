@@ -1,7 +1,7 @@
 name: Build macOS ARM64
 
 on:
-  # 手动触发
+  # 手动触发（测试构建用，不发布 Release）
   workflow_dispatch:
     inputs:
       upload_artifacts:
@@ -10,15 +10,13 @@ on:
         default: 'true'
         type: boolean
 
-  # Tag 推送触发 (v1.0.0, v2.1.3 等)
-  push:
-    tags:
-      - 'v*'
-
   # Pull Request 触发 (仅测试构建，不上传)
   pull_request:
     branches:
       - main
+
+# 注意：此 workflow 仅用于单独测试构建。
+# Tag 推送时请使用 release.yml （三平台并行构建 + 统一发布）
 
 # 取消同一分支/标签的重复运行
 concurrency:
@@ -125,37 +123,21 @@ jobs:
           echo "=== ZIP files ==="
           find dist -name "*.zip" -exec ls -lh {} \;
 
-      # 9. 上传构建产物
+      # 9. 上传构建产物（仅手动触发 + 勾选了上传）
       - name: Upload artifacts
-        # 仅在以下情况上传：
-        # - 手动触发且勾选了上传
-        # - Tag 推送
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_artifacts == 'true') ||
-          startsWith(github.ref, 'refs/tags/v')
+          github.event_name == 'workflow_dispatch' && github.event.inputs.upload_artifacts == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: genvis-macos-arm64-${{ github.ref_name }}
           path: |
             dist/*.dmg
+            dist/*.dmg.blockmap
             dist/*.zip
-            dist/*.blockmap
+            dist/*.zip.blockmap
+            dist/latest-mac.yml
           retention-days: 3
           compression-level: 0  # DMG/ZIP 已压缩，无需二次压缩
-
-      # 10. 发布到 GitHub Release (仅 Tag 推送)
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/*.dmg
-            dist/*.zip
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 11. 打印构建总结
       - name: Build summary

@@ -39,6 +39,8 @@
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.1",
     "easymde": "^2.20.0",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.3",
     "fast-xml-parser": "^5.3.6",
     "fflate": "^0.8.2",
     "framer-motion": "^11.11.17",
@@ -279,7 +281,7 @@
       "gatekeeperAssess": false,
       "entitlements": "tools/macos-signing/entitlements/main.plist",
       "entitlementsInherit": "tools/macos-signing/entitlements/inherit.plist",
-      "notarize": true,
+      "notarize": false,
       "extraResources": [
         {
           "from": "node-runtime/darwin-${arch}",
@@ -334,6 +336,14 @@
         "AppImage"
       ],
       "category": "Development"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ggtiger",
+        "repo": "genvis",
+        "releaseType": "release"
+      }
+    ]
   }
 }
