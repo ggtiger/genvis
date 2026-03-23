@@ -42,6 +42,7 @@ export function isStreamPlatform(platform: IMPlatform): boolean {
 registerStreamAdapter('dingtalk', () => import('./adapters/dingtalk-stream').then(m => m.default));
 registerStreamAdapter('feishu', () => import('./adapters/feishu-stream').then(m => m.default));
 registerStreamAdapter('qq', () => import('./adapters/qq-stream').then(m => m.default));
+registerStreamAdapter('wechat_personal', () => import('./adapters/wechat-personal/adapter').then(m => m.default));
 
 // 注册 Webhook 适配器（懒加载）
 registerWebhookAdapter('wechat', () => import('./adapters/wechat-webhook').then(m => m.default));

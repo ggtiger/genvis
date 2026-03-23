@@ -4,7 +4,7 @@ import { connectionManager } from '@/lib/services/im/connection-manager';
 import { isStreamPlatform } from '@/lib/services/im/adapter-factory';
 import type { IMPlatform, IMChannelConfig, IMChannelsSettings } from '@/lib/services/im/types';
 
-const VALID_PLATFORMS: IMPlatform[] = ['wechat', 'feishu', 'dingtalk', 'qq', 'wecom'];
+const VALID_PLATFORMS: IMPlatform[] = ['wechat', 'feishu', 'dingtalk', 'qq', 'wecom', 'wechat_personal'];
 
 function isValidPlatform(value: unknown): value is IMPlatform {
   return typeof value === 'string' && VALID_PLATFORMS.includes(value as IMPlatform);
@@ -21,6 +21,7 @@ function maskChannelConfig(config: IMChannelConfig): IMChannelConfig {
   return {
     ...config,
     appSecret: maskSecret(config.appSecret),
+    botToken: config.botToken ? maskSecret(config.botToken) : undefined,
   };
 }
 

@@ -796,7 +796,7 @@ function WorkspaceContent() {
                     {(() => {
                       const connected = imStatuses.filter(s => s.connectionStatus === 'connected');
                       const PLATFORM_NAMES: Record<string, string> = {
-                        dingtalk: '钉钉', feishu: '飞书', wechat: '微信', wecom: '企微', qq: 'QQ',
+                        dingtalk: '钉钉', feishu: '飞书', wechat: '微信', wecom: '企微', qq: 'QQ', wechat_personal: '个人微信',
                       };
                       if (connected.length > 0) {
                         const names = connected.map(s => PLATFORM_NAMES[s.platform] || s.platform).join('、');

@@ -9,6 +9,7 @@ export const PLATFORM_MAX_LENGTH: Record<IMPlatform, number> = {
   dingtalk: 20000,
   qq: 4500,
   wecom: 2048,
+  wechat_personal: 4000,
 };
 
 /**
@@ -65,6 +66,7 @@ export function formatReplyForPlatform(reply: string, platform: IMPlatform): str
     case 'wecom':
     case 'qq':
     case 'feishu':
+    case 'wechat_personal':
       return stripMarkdown(reply);
     default:
       return reply;

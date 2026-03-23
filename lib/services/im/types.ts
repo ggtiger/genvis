@@ -1,5 +1,5 @@
 /** 支持的 IM 平台 */
-export type IMPlatform = 'wechat' | 'feishu' | 'dingtalk' | 'qq' | 'wecom';
+export type IMPlatform = 'wechat' | 'feishu' | 'dingtalk' | 'qq' | 'wecom' | 'wechat_personal';
 
 /** 消息接收模式 */
 export type ReceiveMode = 'stream' | 'webhook';
@@ -8,7 +8,7 @@ export type ReceiveMode = 'stream' | 'webhook';
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 /** Stream 平台列表 */
-export const STREAM_PLATFORMS: IMPlatform[] = ['dingtalk', 'feishu', 'qq'];
+export const STREAM_PLATFORMS: IMPlatform[] = ['dingtalk', 'feishu', 'qq', 'wechat_personal'];
 
 /** Webhook 平台列表 */
 export const WEBHOOK_PLATFORMS: IMPlatform[] = ['wechat', 'wecom'];
@@ -44,6 +44,12 @@ export interface IMChannelConfig {
   token: string;
   encodingAESKey?: string;
   extra?: Record<string, string>;
+  /** 个人微信 ilink bot_token（QR 码扫码后获取） */
+  botToken?: string;
+  /** ilink API 基础 URL（默认 https://ilinkai.weixin.qq.com） */
+  baseUrl?: string;
+  /** ilink 长轮询同步缓冲区（需持久化） */
+  syncBuf?: string;
 }
 
 /** 所有平台配置 */
@@ -53,6 +59,7 @@ export interface IMChannelsSettings {
   dingtalk?: IMChannelConfig;
   qq?: IMChannelConfig;
   wecom?: IMChannelConfig;
+  wechat_personal?: IMChannelConfig;
 }
 
 /** 渠道状态信息 */

@@ -300,13 +300,14 @@ function MentionText({ content, employees }: { content: string; employees: Emplo
 
 /** 消息来源渠道标签 */
 const SOURCE_LABELS: Record<string, { label: string; icon: string; color: string }> = {
-  dingtalk: { label: '钉钉', icon: '💬', color: 'text-blue-500' },
-  feishu:   { label: '飞书', icon: '🐦', color: 'text-indigo-500' },
-  wechat:   { label: '微信', icon: '💚', color: 'text-green-500' },
-  wecom:    { label: '企微', icon: '🏢', color: 'text-blue-600' },
-  qq:       { label: 'QQ',   icon: '🐧', color: 'text-sky-500' },
-  web:      { label: '桌面', icon: '🖥️', color: 'text-gray-500' },
-  skill:    { label: '技能', icon: '🧩', color: 'text-purple-500' },
+  dingtalk:         { label: '钉钉',   icon: '💬', color: 'text-blue-500' },
+  feishu:           { label: '飞书',   icon: '🐦', color: 'text-indigo-500' },
+  wechat:           { label: '微信',   icon: '💚', color: 'text-green-500' },
+  wechat_personal:  { label: '个人微信', icon: '💬', color: 'text-green-600' },
+  wecom:            { label: '企微',   icon: '🏢', color: 'text-blue-600' },
+  qq:               { label: 'QQ',    icon: '🐧', color: 'text-sky-500' },
+  web:              { label: '桌面',   icon: '🖥️', color: 'text-gray-500' },
+  skill:            { label: '技能',   icon: '🧩', color: 'text-purple-500' },
 };
 
 function SourceBadge({ source }: { source?: string }) {
