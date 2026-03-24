@@ -2,9 +2,14 @@
  * electron-builder afterSign hook
  * Runs AFTER code signing — only handles notarization.
  * Node-runtime signing is done in afterPack.js (before signing).
+ *
+ * Uses async notarization: submits request and continues without waiting.
+ * Check notarization status manually using:
+ *   xcrun notarytool history --apple-id <id> --password <pwd> --team-id <team>
  */
 
 const path = require('path');
+const { execSync } = require('child_process');
 
 exports.default = async function afterSign(context) {
   const { appOutDir, packager } = context;
@@ -31,28 +36,37 @@ exports.default = async function afterSign(context) {
   const appName = packager.appInfo.productFilename;
   const appPath = path.join(appOutDir, `${appName}.app`);
 
-  console.log(`[afterSign] Notarizing: ${appPath}`);
+  console.log(`[afterSign] Submitting for notarization: ${appPath}`);
   console.log(`[afterSign] Apple ID: ${appleId}, Team: ${teamId}`);
 
   try {
-    const { notarize } = require('@electron/notarize');
+    // Create zip for notarization (notarytool requires zip or dmg)
+    const zipPath = appPath.replace('.app', '-notarize.zip');
+    execSync(`ditto -c -k --keepParent "${appPath}" "${zipPath}"`, { stdio: 'inherit' });
 
-    // 15 分钟超时保护，避免凭证错误导致无限等待
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Notarization timed out after 15 minutes')), 15 * 60 * 1000)
+    // Submit for notarization without waiting
+    const result = execSync(
+      `xcrun notarytool submit "${zipPath}" ` +
+      `--apple-id "${appleId}" ` +
+      `--password "${appleIdPassword}" ` +
+      `--team-id "${teamId}" ` +
+      `--no-wait`,
+      { encoding: 'utf8' }
     );
-    const notarizeTask = notarize({
-      tool: 'notarytool',
-      appPath,
-      appleId,
-      appleIdPassword,
-      teamId,
-    });
 
-    await Promise.race([notarizeTask, timeout]);
-    console.log('[afterSign] Notarization complete!');
+    console.log('[afterSign] Notarization submitted successfully!');
+    console.log('[afterSign] Submission result:', result.trim());
+    console.log('[afterSign] Check status with: xcrun notarytool history --apple-id <id> --password <pwd> --team-id <team>');
+
+    // Clean up zip
+    try {
+      require('fs').unlinkSync(zipPath);
+    } catch {}
+
   } catch (err) {
-    console.error('[afterSign] Notarization failed:', err.message);
-    throw err;
+    // Log error but don't fail the build
+    console.error('[afterSign] Notarization submission failed:', err.message);
+    console.warn('[afterSign] Continuing build without notarization. You can notarize manually later.');
+    // Don't throw - allow build to continue
   }
 };
