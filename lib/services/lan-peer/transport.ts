@@ -125,7 +125,10 @@ export class PeerTransport {
       ws.on('close', () => {
         if (remotePeerId) {
           this.stopHeartbeat(remotePeerId);
-          this.connections.delete(remotePeerId);
+          // Only delete if this ws is still the active connection for this peer
+          if (this.connections.get(remotePeerId) === ws) {
+            this.connections.delete(remotePeerId);
+          }
         }
       });
     });
@@ -142,7 +145,16 @@ export class PeerTransport {
 
     return new Promise((resolve, reject) => {
       ws.on('open', () => {
-        this.connections.set(peerId, ws);
+        // Only store if no connection was established while we were connecting
+        if (!this.connections.has(peerId)) {
+          this.connections.set(peerId, ws);
+        } else {
+          // A server-side connection was established in the meantime
+          // Close this duplicate client connection silently
+          try { ws.close(); } catch { /* ignore */ }
+          resolve();
+          return;
+        }
         this.reconnectAttempts.set(peerId, 0);
         this.startHeartbeat(peerId, ws);
 
@@ -181,12 +193,18 @@ export class PeerTransport {
 
       ws.on('close', () => {
         this.stopHeartbeat(peerId);
-        this.connections.delete(peerId);
-        this.scheduleReconnect(peerId, peerName, ip, port);
+        // Only delete if this ws is still the active connection for this peer
+        if (this.connections.get(peerId) === ws) {
+          this.connections.delete(peerId);
+          this.scheduleReconnect(peerId, peerName, ip, port);
+        }
       });
 
       ws.on('error', (err: Error) => {
-        this.connections.delete(peerId);
+        // Only delete if this ws is still the active connection
+        if (this.connections.get(peerId) === ws) {
+          this.connections.delete(peerId);
+        }
         reject(err);
       });
     });
@@ -209,8 +227,25 @@ export class PeerTransport {
       ? memberIds.filter((id) => id !== this.localPeerId)
       : Array.from(this.connections.keys());
 
-    for (const peerId of targets) {
-      this.send(peerId, message);
+    // Log broadcast targets for debugging connection issues
+    if (message.type === 'AI_STREAM_EVENT' || message.type === 'GROUP_MESSAGE') {
+      const msgType = message.type;
+      const successIds: string[] = [];
+      const failIds: string[] = [];
+      for (const peerId of targets) {
+        if (this.send(peerId, message)) {
+          successIds.push(peerId);
+        } else {
+          failIds.push(peerId);
+        }
+      }
+      if (failIds.length > 0) {
+        console.warn(`[LanPeer Transport] broadcast ${msgType}: sent to ${successIds.length}, failed for ${failIds.join(', ')}`);
+      }
+    } else {
+      for (const peerId of targets) {
+        this.send(peerId, message);
+      }
     }
   }
 

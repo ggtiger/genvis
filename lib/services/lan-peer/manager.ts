@@ -91,13 +91,20 @@ export class LanPeerManager {
     const senderId = userMessage.senderId;
     const group = await getGroup(groupId);
 
+    if (!group) {
+      console.warn(`[LanPeer] triggerAIReply: group ${groupId} not found, skipping AI reply`);
+      return;
+    }
+
     // Parse content to extract cleanContent (strip @name prefix)
-    const enabledSkills = group?.enabledSkills || [];
+    const enabledSkills = group.enabledSkills || [];
     const interaction = parseInteractionMode(userMessage.content, enabledSkills);
     const instruction = interaction.cleanContent || userMessage.content;
 
-    // Register broadcast callback: forward ai_stream_* events to all peers via WebSocket
-    const members = group?.members || [];
+    // Register broadcast callback: forward ai_stream_* events to ALL group members via WebSocket
+    // This includes the original message sender so they can see the streaming status
+    const members = group.members || [];
+    console.log(`[LanPeer] triggerAIReply: groupId=${groupId}, originalSender=${senderId}, broadcastTargets=${members.join(', ')}`);
     lanPeerStream.setBroadcastCallback(groupId, (event) => {
       this.transport.broadcast({
         type: 'AI_STREAM_EVENT',
@@ -142,13 +149,13 @@ export class LanPeerManager {
       lanPeerStream.clearBroadcastCallback(groupId);
     }
 
-    // After SDK completes, broadcast final AI message to peers
+    // After SDK completes, broadcast final AI message to ALL group members (including original sender)
     const recentMsgs = await getLanMessagesByGroup(groupId, 5);
     const lastAIMsg = recentMsgs.reverse().find(
       (m) => m.senderId === AI_SENDER_ID && m.requestId === aiRequestId && m.messageType === 'text'
     );
 
-    if (lastAIMsg && group) {
+    if (lastAIMsg) {
       const broadcastMsg: ChatMessage = {
         id: lastAIMsg.id,
         groupId,
@@ -161,13 +168,16 @@ export class LanPeerManager {
         status: 'sent',
       };
 
+      // Broadcast AI reply to ALL members (group.members), not excluding the original sender
+      // transport.broadcast will filter out localPeerId (the creator), so all remote members receive it
+      console.log(`[LanPeer] Broadcasting AI reply to members: ${members.join(', ')}`);
       this.transport.broadcast({
         type: 'GROUP_MESSAGE',
         senderId: broadcastMsg.senderId,
         senderName: broadcastMsg.senderName,
         timestamp: broadcastMsg.timestamp,
         payload: { message: broadcastMsg },
-      }, group.members);
+      }, members);
     }
   }
 
@@ -204,14 +214,19 @@ export class LanPeerManager {
               (id: string) => id !== this.peerId && id !== fromPeerId && id !== chatMsg.senderId
             );
             if (relayTargets.length > 0) {
+              console.log(`[LanPeer] Relaying GROUP_MESSAGE from ${chatMsg.senderId} to ${relayTargets.length} member(s): ${relayTargets.join(', ')}`);
               for (const targetId of relayTargets) {
-                this.transport.send(targetId, msg);
+                const sent = this.transport.send(targetId, msg);
+                if (!sent) {
+                  console.warn(`[LanPeer] Failed to relay message to ${targetId} (not connected)`);
+                }
               }
             }
 
             // Trigger AI reply for user text messages
             if (chatMsg.senderId !== 'ai-assistant' && chatMsg.messageType === 'text'
                 && chatMsg.interactionMode !== 'no_ai') {
+              console.log(`[LanPeer] Triggering AI reply for GROUP_MESSAGE from ${chatMsg.senderId}, groupId=${chatMsg.groupId}, messageType=${chatMsg.messageType}, interactionMode=${chatMsg.interactionMode}`);
               this.triggerAIReply(chatMsg.groupId, chatMsg).catch((err) => {
                 console.error('[LanPeer] AI reply for peer message failed:', err);
               });

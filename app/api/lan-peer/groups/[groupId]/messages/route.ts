@@ -93,14 +93,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     touchGroupTimestamp(groupId).catch(() => {});
 
     // Broadcast to group members via WebSocket
+    // Star topology: members only have direct connection to creator,
+    // so non-creator members must send to creator who relays to others
     if (manager && group) {
-      manager.transport.broadcast({
-        type: 'GROUP_MESSAGE',
+      const peerMsg = {
+        type: 'GROUP_MESSAGE' as const,
         senderId,
         senderName,
         timestamp: message.timestamp,
         payload: { message },
-      }, group.members);
+      };
+
+      if (senderId === group.creatorId) {
+        // Creator: broadcast directly to all members
+        manager.transport.broadcast(peerMsg, group.members);
+      } else {
+        // Non-creator member: send only to creator, who will relay to others
+        manager.transport.send(group.creatorId, peerMsg);
+      }
     }
 
     // If skill_invoke mode, trigger AI reply with skill plugins loaded (NOT REST API call).
