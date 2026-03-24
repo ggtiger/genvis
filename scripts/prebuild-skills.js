@@ -143,10 +143,10 @@ function buildNextjsSkill(skillName, skillDir) {
   if (fs.existsSync(prismaSchemaPath)) {
     console.log(`[prebuild] Running prisma generate for "${skillName}" (multi-platform)...`);
     // Generate engines for all supported platforms (macOS, Windows, Linux)
-    // Note: Prisma uses 'darwin' for macOS x64, 'windows' for Windows x64
+    // Note: Prisma uses 'darwin' for macOS x64, 'debian-openssl-3.0.x' for modern Linux
     const prismaEnv = {
       ...process.env,
-      PRISMA_CLI_BINARY_TARGETS: 'darwin,darwin-arm64,windows,linux-static-x64,linux-static-arm64',
+      PRISMA_CLI_BINARY_TARGETS: 'darwin,darwin-arm64,windows,debian-openssl-3.0.x',
     };
     execSync(`npx prisma generate`, {
       cwd: skillDir,
