@@ -144,6 +144,10 @@ function buildNextjsSkill(skillName, skillDir) {
     execSync(`npx prisma generate`, {
       cwd: skillDir,
       stdio: 'inherit',
+      env: {
+        ...process.env,
+        PRISMA_ENGINES_MIRROR: 'https://registry.npmmirror.com/-/binary/prisma',
+      },
     });
   }
 
