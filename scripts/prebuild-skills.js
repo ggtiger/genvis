@@ -138,20 +138,12 @@ function buildNextjsSkill(skillName, skillDir) {
   });
 
   // 2. Prisma generate if schema exists
-  // Generate Prisma Client with multi-platform binary targets for cross-platform deployment
   const prismaSchemaPath = path.join(skillDir, 'prisma', 'schema.prisma');
   if (fs.existsSync(prismaSchemaPath)) {
-    console.log(`[prebuild] Running prisma generate for "${skillName}" (multi-platform)...`);
-    // Generate engines for all supported platforms (macOS, Windows, Linux)
-    // Note: Prisma uses 'darwin' for macOS x64, 'debian-openssl-3.0.x' for modern Linux
-    const prismaEnv = {
-      ...process.env,
-      PRISMA_CLI_BINARY_TARGETS: 'darwin,darwin-arm64,windows,debian-openssl-3.0.x',
-    };
+    console.log(`[prebuild] Running prisma generate for "${skillName}"...`);
     execSync(`npx prisma generate`, {
       cwd: skillDir,
       stdio: 'inherit',
-      env: prismaEnv,
     });
   }
 
