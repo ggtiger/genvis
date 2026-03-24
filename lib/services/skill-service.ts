@@ -13,6 +13,11 @@ import {
 } from '@/lib/config/paths';
 import type { DeployStatus, SkillDeployMeta } from './deploy-manager';
 
+// Directories and files to preserve when updating builtin skills
+// These contain user data that should not be overwritten on version update
+const PRESERVE_DIRS_ON_UPDATE = ['prisma', 'data', 'node_modules', '.next'];
+const PRESERVE_FILES_ON_UPDATE = ['.env.local'];
+
 // Global singleton for initialization state (similar to DB client pattern)
 const globalForSkills = global as unknown as {
   skillsInitialized: boolean | undefined;
@@ -327,8 +332,43 @@ async function ensureSkillInUserDir(builtinSkillPath: string, skillName: string)
     // Extract ZIP mode: skill has project.zip but missing wxauto_lib
     console.log(`[SkillService] Extracting ${skillName} from project.zip`);
 
-    // Remove old directory if exists
+    // Backup user data directories and files before removal
+    const backupDir = path.join(USER_SKILLS_DIR_ABSOLUTE, `.backup-${skillName}-${Date.now()}`);
+    const preservedPaths: { original: string; backup: string; isDir: boolean }[] = [];
+
     if (fsSync.existsSync(targetDir)) {
+      // Collect paths to preserve
+      for (const dirName of PRESERVE_DIRS_ON_UPDATE) {
+        const originalPath = path.join(targetDir, dirName);
+        if (fsSync.existsSync(originalPath)) {
+          preservedPaths.push({
+            original: originalPath,
+            backup: path.join(backupDir, dirName),
+            isDir: true
+          });
+        }
+      }
+      for (const fileName of PRESERVE_FILES_ON_UPDATE) {
+        const originalPath = path.join(targetDir, fileName);
+        if (fsSync.existsSync(originalPath)) {
+          preservedPaths.push({
+            original: originalPath,
+            backup: path.join(backupDir, fileName),
+            isDir: false
+          });
+        }
+      }
+
+      // Move preserved items to backup location
+      if (preservedPaths.length > 0) {
+        await fs.mkdir(backupDir, { recursive: true });
+        for (const item of preservedPaths) {
+          await fs.rename(item.original, item.backup);
+          console.log(`[SkillService] Backed up: ${item.original}`);
+        }
+      }
+
+      // Remove old directory
       await fs.rm(targetDir, { recursive: true, force: true });
     }
 
@@ -355,29 +395,43 @@ async function ensureSkillInUserDir(builtinSkillPath: string, skillName: string)
       }
     }
 
+    // Restore backed up user data
+    for (const item of preservedPaths) {
+      // Remove any files that were extracted from ZIP before restoring backup
+      if (fsSync.existsSync(item.original)) {
+        await fs.rm(item.original, { recursive: true, force: true });
+      }
+      await fs.rename(item.backup, item.original);
+      console.log(`[SkillService] Restored: ${item.original}`);
+    }
+
+    // Cleanup backup directory
+    if (fsSync.existsSync(backupDir)) {
+      await fs.rm(backupDir, { recursive: true, force: true }).catch(() => {});
+    }
+
     console.log(`[SkillService] Extracted and copied builtin skill: ${skillName}`);
   } else {
     // Normal copy mode: no ZIP or already extracted
     // Always overwrite to ensure latest version
-    const skipDirs = ['node_modules']; // Always skip node_modules in copy
+    const skipDirs = [...PRESERVE_DIRS_ON_UPDATE]; // Copy preserve list as skip list
     if (fsSync.existsSync(targetDir)) {
-      // Remove old files but preserve node_modules and .next if they exist
-      // (node_modules: avoid re-installing deps; .next: avoid re-building)
-      const nodeModulesPath = path.join(targetDir, 'node_modules');
-      const nextBuildPath = path.join(targetDir, '.next');
-      const hasNodeModules = fsSync.existsSync(nodeModulesPath);
-      const hasNextBuild = fsSync.existsSync(nextBuildPath);
+      // Remove old files but preserve user data, node_modules and .next if they exist
+      const hasPreserveItems = PRESERVE_DIRS_ON_UPDATE.some(dirName =>
+        fsSync.existsSync(path.join(targetDir, dirName))
+      ) || PRESERVE_FILES_ON_UPDATE.some(fileName =>
+        fsSync.existsSync(path.join(targetDir, fileName))
+      );
 
-      if (hasNodeModules || hasNextBuild) {
-        // Preserve node_modules and .next: remove all other files/dirs first
+      if (hasPreserveItems) {
+        // Preserve user data: remove all other files/dirs first
         const entries = await fs.readdir(targetDir, { withFileTypes: true });
         for (const entry of entries) {
-          if (entry.name === 'node_modules' || entry.name === '.next') continue;
+          if (PRESERVE_DIRS_ON_UPDATE.includes(entry.name) ||
+              PRESERVE_FILES_ON_UPDATE.includes(entry.name)) {
+            continue;
+          }
           await fs.rm(path.join(targetDir, entry.name), { recursive: true, force: true });
-        }
-        // Also skip .next in copy since target already has it
-        if (hasNextBuild) {
-          skipDirs.push('.next');
         }
       } else {
         await fs.rm(targetDir, { recursive: true, force: true });
