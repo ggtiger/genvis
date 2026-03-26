@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback, memo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, AlertTriangle, X } from 'lucide-react';
+import { Sparkles, AlertTriangle, X, Store, Folder } from 'lucide-react';
 import SkillDetailPanel from '@/components/skills/SkillDetailPanel';
+import SkillMarketPanel from '@/components/skills/SkillMarketPanel';
 import { useToast } from '@/contexts/ToastContext';
 import type { SkillMeta } from '@/lib/services/skill-service';
 
@@ -127,6 +128,7 @@ export default function SkillsSettings() {
   const [importing, setImporting] = useState(false);
   const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
   const [skillFilter, setSkillFilter] = useState<'all' | 'app' | 'skill'>('all');
+  const [activeTab, setActiveTab] = useState<'my-skills' | 'market'>('my-skills');
   const [thirdPartyOpen, setThirdPartyOpen] = useState(false);
   const [thirdPartyUrl, setThirdPartyUrl] = useState('');
   const [thirdPartyLoading, setThirdPartyLoading] = useState(false);
@@ -356,6 +358,40 @@ export default function SkillsSettings() {
   return (
     <>
       <div className="space-y-4">
+        {/* Tab Navigation */}
+        <div className="flex items-center gap-4 border-b border-gray-200 dark:border-gray-700 pb-3">
+          <button
+            onClick={() => setActiveTab('my-skills')}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              activeTab === 'my-skills'
+                ? 'bg-gray-900 dark:bg-white/20 text-white'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            <Folder className="w-4 h-4" />
+            我的技能
+          </button>
+          <button
+            onClick={() => setActiveTab('market')}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              activeTab === 'market'
+                ? 'bg-gray-900 dark:bg-white/20 text-white'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            <Store className="w-4 h-4" />
+            技能市场
+          </button>
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'market' ? (
+          <SkillMarketPanel
+            installedSkillNames={skills.map(s => s.name)}
+            onSkillInstalled={loadSkills}
+          />
+        ) : (
+          <>
         {/* Header */}
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-medium text-gray-900 dark:text-white">我的技能</h3>
@@ -446,6 +482,8 @@ export default function SkillsSettings() {
                 />
               ))}
           </div>
+        )}
+          </>
         )}
       </div>
 
