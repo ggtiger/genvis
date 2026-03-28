@@ -30,7 +30,7 @@ export interface SecretaryAction {
 }
 
 /** 消息来源渠道 */
-export type MessageSource = 'web' | 'dingtalk' | 'feishu' | 'wechat' | 'wecom' | 'qq' | 'skill';
+export type MessageSource = 'web' | 'dingtalk' | 'feishu' | 'wechat' | 'wecom' | 'qq' | 'skill' | 'wechat_personal';
 
 export interface SecretaryAttachment {
   name: string;
@@ -41,6 +41,8 @@ export interface SecretaryAttachment {
 }
 
 export interface SecretaryMessage {
+  /** Unique message ID for deduplication */
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
   actions?: SecretaryAction[];

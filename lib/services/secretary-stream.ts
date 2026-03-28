@@ -1,13 +1,11 @@
 /**
  * Secretary SSE Stream Manager
  *
- * Manages SSE connections for the secretary home page.
- * Replaces client-side polling with server-push for:
- * - Dispatch task status updates (completed/failed/waiting_feedback)
- * - New messages from IM channels
- * - Dashboard refresh signals
- *
- * Uses a dedicated channel ID to avoid collision with project streams.
+ * Manages SSE connections for the secretary chat.
+ * Supports:
+ * - Dispatch task status updates (completed/failed/feedback)
+ * - AI streaming (start/delta/end, tool use/result)
+ * - New messages and dashboard refresh
  */
 
 import { randomUUID } from 'crypto';
@@ -16,13 +14,25 @@ export interface SecretaryEvent {
   type:
     | 'connected'
     | 'heartbeat'
+    | 'new_message'
+    | 'ai_stream_start'
+    | 'ai_stream_delta'
+    | 'ai_stream_end'
+    | 'ai_tool_use'
+    | 'ai_tool_result'
+    | 'error'
     | 'dispatch_completed'
     | 'dispatch_failed'
     | 'dispatch_feedback'
-    | 'new_message'
     | 'dashboard_refresh'
     | 'memory_reminder';
   data: Record<string, unknown>;
+}
+
+interface ActiveStreamInfo {
+  requestId: string;
+  startedAt: string;
+  abortController: AbortController;
 }
 
 export class SecretaryStreamManager {
@@ -30,6 +40,8 @@ export class SecretaryStreamManager {
   private connectionIds = new WeakMap<ReadableStreamDefaultController, string>();
   /** 缓存在无连接时发布的重要事件，等客户端重连后推送 */
   bufferedEvents: SecretaryEvent[] = [];
+  /** Currently active AI streams: requestId -> stream info */
+  private activeStreams = new Map<string, ActiveStreamInfo>();
 
   addConnection(controller: ReadableStreamDefaultController): string {
     const id = randomUUID();
@@ -60,12 +72,36 @@ export class SecretaryStreamManager {
   }
 
   publish(event: SecretaryEvent): void {
+    // 当 ai_stream_end 事件发出时，清理对应的 ai_stream_start 缓存（执行已结束，不需要再通知重连客户端）
+    if (event.type === 'ai_stream_end') {
+      const endRequestId = (event.data as any)?.requestId;
+      if (endRequestId) {
+        this.bufferedEvents = this.bufferedEvents.filter(e => {
+          if (e.type === 'ai_stream_start' && (e.data as any)?.requestId === endRequestId) {
+            console.log(`[SecretaryStream] Cleared buffered ai_stream_start for completed request: ${endRequestId}`);
+            return false;
+          }
+          return true;
+        });
+      }
+    }
+
     if (this.connections.size === 0) {
       console.warn(`[SecretaryStream] publish(${event.type}) 时无活跃连接，消息丢失`);
-      // 缓存最近的 new_message 事件，等客户端重连后推送
-      if (event.type === 'new_message' || event.type === 'dispatch_completed' || event.type === 'dispatch_failed') {
+      // 缓存重要事件，等客户端重连后推送
+      // - new_message: 新消息（必须缓存）
+      // - dispatch_completed/dispatch_failed: 派发结果（必须缓存）
+      // - ai_stream_start: AI 正在执行中（需要缓存，让重连客户端知道状态）
+      // - dispatch_feedback: 需要用户确认（必须缓存）
+      // 不缓存: ai_stream_delta（增量内容太多）、ai_tool_use/ai_tool_result（中间状态）
+      const shouldBuffer = 
+        event.type === 'new_message' || 
+        event.type === 'dispatch_completed' || 
+        event.type === 'dispatch_failed' ||
+        event.type === 'ai_stream_start' ||
+        event.type === 'dispatch_feedback';
+      if (shouldBuffer) {
         this.bufferedEvents.push(event);
-        // 最多缓存 50 条
         if (this.bufferedEvents.length > 50) this.bufferedEvents.shift();
       }
       return;
@@ -92,8 +128,75 @@ export class SecretaryStreamManager {
     }
   }
 
+  // ===== AI Stream Management =====
+
+  markStreamActive(requestId: string): AbortController {
+    const abortController = new AbortController();
+    this.activeStreams.set(requestId, {
+      requestId,
+      startedAt: new Date().toISOString(),
+      abortController,
+    });
+    console.log(`[SecretaryStream] Stream active: ${requestId}, total: ${this.activeStreams.size}`);
+    return abortController;
+  }
+
+  markStreamDone(requestId: string): void {
+    this.activeStreams.delete(requestId);
+    console.log(`[SecretaryStream] Stream done: ${requestId}, total: ${this.activeStreams.size}`);
+  }
+
+  isStreaming(): boolean {
+    return this.activeStreams.size > 0;
+  }
+
+  getActiveStreams(): string[] {
+    return Array.from(this.activeStreams.keys());
+  }
+
+  getActiveStreamDetails(): Map<string, { requestId: string; startedAt: string }> {
+    return new Map(
+      Array.from(this.activeStreams.entries()).map(([k, v]) => [
+        k,
+        { requestId: v.requestId, startedAt: v.startedAt },
+      ])
+    );
+  }
+
+  abortStream(requestId?: string): { success: boolean; abortedCount: number; error?: string } {
+    if (requestId) {
+      const stream = this.activeStreams.get(requestId);
+      if (!stream) {
+        return { success: false, abortedCount: 0, error: 'No active stream found' };
+      }
+      stream.abortController.abort();
+      this.activeStreams.delete(requestId);
+      console.log(`[SecretaryStream] Stream aborted: ${requestId}`);
+      return { success: true, abortedCount: 1 };
+    } else {
+      const count = this.activeStreams.size;
+      if (count === 0) {
+        return { success: false, abortedCount: 0, error: 'No active streams' };
+      }
+      for (const [, stream] of this.activeStreams) {
+        stream.abortController.abort();
+      }
+      console.log(`[SecretaryStream] All ${count} streams aborted`);
+      this.activeStreams.clear();
+      return { success: true, abortedCount: count };
+    }
+  }
+
+  getAbortSignal(requestId: string): AbortSignal | undefined {
+    return this.activeStreams.get(requestId)?.abortController.signal;
+  }
+
   get connectionCount(): number {
     return this.connections.size;
+  }
+
+  get activeStreamCount(): number {
+    return this.activeStreams.size;
   }
 
   closeAll(): void {

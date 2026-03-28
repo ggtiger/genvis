@@ -10,7 +10,8 @@
  * 4. 管理 ConversationContext 和 PendingQueue
  */
 
-import { loadSession, saveSession, type SecretaryMessage, type SecretaryAttachment, type MessageSource } from './secretary-session';
+import { type SecretaryAttachment, type MessageSource } from './secretary-session';
+import { createSecretaryMessage } from './secretary/secretary-message-service';
 import type { SecretaryStreamManager } from './secretary-stream';
 
 /** 动态获取 secretaryStream 单例，避免 HMR 导致引用过期 */
@@ -198,14 +199,18 @@ export function resetFeedbackNotified(projectId: string): void {
 export function notifyTaskCompleted(projectId: string): void {
   const tracked = trackedDispatches.get(projectId);
   if (tracked) {
-    handleCompletedTask(projectId, tracked).then(() => {
-      trackedDispatches.delete(projectId);
-      if (trackedDispatches.size === 0) {
-        stopPolling();
-      }
-    }).catch((err: unknown) => {
-      console.error(`[DispatchTracker] notifyTaskCompleted 处理失败:`, err);
-    });
+    trackedDispatches.delete(projectId);  // 先删除，防止轮询重复处理
+    
+    handleCompletedTask(projectId, tracked)
+      .then(() => {
+        if (trackedDispatches.size === 0) {
+          stopPolling();
+        }
+      })
+      .catch((err: unknown) => {
+        console.error(`[DispatchTracker] notifyTaskCompleted 处理失败:`, err);
+        // 不回滚删除操作，因为任务确实已完成
+      });
     return;
   }
 
@@ -384,6 +389,11 @@ async function pollDispatchStatuses(): Promise<void> {
     const finishedIds: string[] = [];
 
     for (const [projectId, tracked] of trackedDispatches) {
+      // 防御性检查：如果已被 notifyTaskCompleted 删除，跳过
+      if (!trackedDispatches.has(projectId)) {
+        continue;
+      }
+      
       try {
         // 超过 30 分钟的任务自动清理（但先尝试获取结果）
         if (Date.now() - tracked.createdAt > FEEDBACK_TIMEOUT_MS) {
@@ -588,7 +598,7 @@ async function handleTaskCompletionContext(tracked: TrackedDispatch): Promise<vo
 }
 
 /**
- * 将结果消息追加到秘书主会话
+ * 将结果消息追加到秘书数据库
  */
 async function appendToSecretarySession(
   content: string,
@@ -596,22 +606,23 @@ async function appendToSecretarySession(
   extras?: { images?: string[]; attachments?: SecretaryAttachment[] },
 ): Promise<void> {
   try {
-    const session = await loadSession();
-    const msg: SecretaryMessage = {
+    const msg = await createSecretaryMessage({
       role: 'assistant',
+      messageType: 'text',
       content,
-      actions: [{
-        type: 'dispatch',
-        employeeName: tracked.employeeName,
-        projectId: tracked.projectId,
-      }],
-      timestamp: new Date().toISOString(),
-      source: tracked.source,
-      ...(extras?.images?.length ? { images: extras.images } : {}),
-      ...(extras?.attachments?.length ? { attachments: extras.attachments } : {}),
-    };
-    session.messages.push(msg);
-    await saveSession(session);
+      senderId: 'secretary',
+      senderName: '秘书',
+      interactionMode: 'ai_chat',
+      metadata: {
+        actions: [{
+          type: 'dispatch',
+          employeeName: tracked.employeeName,
+          projectId: tracked.projectId,
+        }],
+        ...(extras?.images?.length ? { images: extras.images } : {}),
+        ...(extras?.attachments?.length ? { attachments: extras.attachments } : {}),
+      },
+    });
 
     // Push new message via SSE so the client doesn't need to poll
     getSecretaryStream().publish({
@@ -619,7 +630,7 @@ async function appendToSecretarySession(
       data: { message: msg },
     });
   } catch (err) {
-    console.error('[DispatchTracker] 写入秘书会话失败:', err);
+    console.error('[DispatchTracker] 写入秘书数据库失败:', err);
   }
 }
 

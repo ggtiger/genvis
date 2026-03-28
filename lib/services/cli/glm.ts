@@ -670,6 +670,11 @@ async function executeGLM(
         if (requestId) {
           await markUserRequestAsCompleted(requestId);
         }
+        // 主动通知 dispatch tracker 任务已完成，不依赖轮询延迟
+        try {
+          const { notifyTaskCompleted } = await import('@/lib/services/dispatch-tracker');
+          notifyTaskCompleted(projectId);
+        } catch { /* ignore - tracker may not be tracking this project */ }
       }
     }
 
@@ -694,6 +699,11 @@ async function executeGLM(
     if (requestId) {
       await markUserRequestAsCompleted(requestId);
     }
+    // 主动通知 dispatch tracker 任务已完成，不依赖轮询延迟
+    try {
+      const { notifyTaskCompleted } = await import('@/lib/services/dispatch-tracker');
+      notifyTaskCompleted(projectId);
+    } catch { /* ignore - tracker may not be tracking this project */ }
   } catch (error) {
     const stderrTail = stderrBuffer.slice(-15).join('\n');
     let errorMessage =

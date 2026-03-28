@@ -762,6 +762,11 @@ ${instruction.trim()}`;
       if (requestId) {
         await markUserRequestAsCompleted(requestId);
       }
+      // 主动通知 dispatch tracker 任务已完成，不依赖轮询延迟
+      try {
+        const { notifyTaskCompleted } = await import('@/lib/services/dispatch-tracker');
+        notifyTaskCompleted(projectId);
+      } catch { /* ignore - tracker may not be tracking this project */ }
       return;
     }
 

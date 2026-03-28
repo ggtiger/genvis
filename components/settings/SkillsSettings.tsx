@@ -124,7 +124,8 @@ export default function SkillsSettings() {
   const router = useRouter();
   const toast = useToast();
   const [skills, setSkills] = useState<(SkillMeta & { enabled?: boolean; hasUnfilledRequiredVars?: boolean })[]>([]);
-  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillsLoading, setSkillsLoading] = useState(true); // Start with loading state
+  const [initialLoad, setInitialLoad] = useState(true); // Track first load
   const [importing, setImporting] = useState(false);
   const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
   const [skillFilter, setSkillFilter] = useState<'all' | 'app' | 'skill'>('all');

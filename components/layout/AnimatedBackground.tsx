@@ -49,10 +49,10 @@ function AnimatedBackground({
   // 如果是 CSS 渐变背景，添加动态渐变动画
   if (bgCss) {
     return (
-      <div 
+      <div
         className={`fixed inset-0 -z-10 ${className}`}
-        style={{ 
-          background: bgCss,
+        style={{
+          backgroundImage: bgCss,
           backgroundSize: '200% 200%',
           animation: isReady && animationType !== 'none' ? 'gradientShift 15s ease infinite' : undefined,
         }}

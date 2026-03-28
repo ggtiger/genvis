@@ -2,8 +2,10 @@
  * IM Channel Message Processor
  *
  * Unified message processing pipeline shared by both Stream and Webhook adapters.
- * Flow: Rate limit check → Unsupported type handling → Load session → Call Secretary core →
- *       Format reply → Send reply → Save session
+ * Flow: Rate limit check → Unsupported type handling → Load session →
+ *       Check ConversationContext → Route to project OR Save to secretary session + AI processing
+ *
+ * Messages to secretary are auto-processed by AI with streaming events (ai_stream_start/delta/end).
  *
  * Validates: Requirements 4.1, 4.3, 4.5, 3.7
  */
@@ -13,30 +15,55 @@ import type { IMAdapterBase } from './adapter';
 import type { IMSession } from './im-session';
 import { isRateLimited, recordMessage } from './rate-limiter';
 import { loadIMSession, saveIMSession } from './im-session';
-import { formatReplyForPlatform, splitMessage } from './im-formatter';
-import { loadSession, saveSession, type MessageSource } from '@/lib/services/secretary-session';
-import { getEmployeeById, getAllEmployees } from '@/lib/services/employee-service';
-import { loadMemory } from '@/lib/services/secretary-memory';
-import { buildMemoryPromptBlockFromResults } from '@/lib/services/secretary-memory-prompt';
-import { searchMemory } from '@/lib/services/memory-retriever';
-import {
-  isSimpleGreeting,
-  pickGreetingReply,
-  loadClaudeConfig,
-  callClaudeAPI,
-  parseAIDecision,
-  executeDispatch,
-  executeSkillCall,
-} from '@/lib/services/secretary-core';
-import { classifyIntent, buildDetailedPrompt } from '@/lib/services/secretary-intent';
-import { loadIntentExamples, formatIntentExamplesBlock } from '@/lib/services/intent-example-store';
-import { searchDispatchLearnings } from '@/lib/services/correction-retriever';
-import {
-  formatSummaryForPrompt,
-} from '@/lib/services/conversation-summarizer';
-import {
-  getRecentWorkEvents,
-} from '@/lib/services/work-event-recorder';
+import { createSecretaryMessage } from '@/lib/services/secretary/secretary-message-service';
+import { secretaryStream } from '@/lib/services/secretary-stream';
+import { executeSecretaryClaude, SECRETARY_SENDER_ID, SECRETARY_SENDER_NAME } from '@/lib/services/secretary/secretary-claude';
+import { randomUUID } from 'crypto';
+
+// ========== IM Reply Deduplication Lock ==========
+// Prevents duplicate IM replies for the same requestId
+const imReplyLocks = new Set<string>();
+const MAX_LOCK_ENTRIES = 500;
+
+/** Clean up old locks to prevent memory leak */
+function cleanupOldLocks(): void {
+  if (imReplyLocks.size > MAX_LOCK_ENTRIES) {
+    const iterator = imReplyLocks.values();
+    const toDelete = imReplyLocks.size - MAX_LOCK_ENTRIES;
+    for (let i = 0; i < toDelete; i++) {
+      const val = iterator.next().value;
+      if (val) imReplyLocks.delete(val);
+    }
+  }
+}
+
+// ========== Message Processing Deduplication ==========
+// Prevents duplicate processing of the same IM message
+const processedIMMessages = new Set<string>();
+const MAX_PROCESSED_MESSAGES = 500;
+
+/** Generate a unique key for deduplication based on message content and sender */
+function getMessageDedupeKey(message: IMStandardMessage): string {
+  // Prefer originalMessageId, fallback to content hash
+  if (message.originalMessageId) {
+    return `${message.platform}:${message.senderId}:${message.originalMessageId}`;
+  }
+  // Fallback: use content + timestamp (within 5 second window)
+  const timestampWindow = Math.floor((message.timestamp || Date.now()) / 5000);
+  return `${message.platform}:${message.senderId}:${timestampWindow}:${message.content.slice(0, 100)}`;
+}
+
+/** Clean up old processed message records */
+function cleanupOldProcessedMessages(): void {
+  if (processedIMMessages.size > MAX_PROCESSED_MESSAGES) {
+    const iterator = processedIMMessages.values();
+    const toDelete = processedIMMessages.size - MAX_PROCESSED_MESSAGES;
+    for (let i = 0; i < toDelete; i++) {
+      const val = iterator.next().value;
+      if (val) processedIMMessages.delete(val);
+    }
+  }
+}
 
 // ========== Helpers ==========
 
@@ -52,236 +79,6 @@ function replyBase(message: IMStandardMessage): Omit<IMReplyRequest, 'content'> 
   };
 }
 
-// ========== Secretary Core Logic ==========
-
-/**
- * Result from calling the Secretary core logic.
- */
-export interface SecretaryCoreResult {
-  reply: string;
-  actions?: Array<{
-    type: 'dispatch' | 'skill_call' | 'info';
-    employeeId?: string;
-    employeeName?: string;
-    projectId?: string;
-    skillName?: string;
-    endpoint?: string;
-    result?: unknown;
-  }>;
-}
-
-/**
- * Call the Secretary core logic to process a user message.
- *
- * Uses shared secretary-core.ts for all AI pipeline logic:
- * 1. Load Claude config
- * 2. Load secretary employee system prompt
- * 3. Build conversation context from IM session history
- * 4. Call Claude API for intent analysis
- * 5. Parse AI decision and execute action (dispatch / skill_call / direct_reply)
- */
-export async function callSecretaryCore(
-  content: string,
-  session: IMSession
-): Promise<SecretaryCoreResult> {
-  let step = 'init';
-  try {
-    // 1. Load Claude API config (once for entire request)
-    step = 'loadClaudeConfig';
-    const claudeConfig = await loadClaudeConfig();
-
-    if (!claudeConfig.apiKey) {
-      return { reply: 'AI 服务未配置，请在设置中配置 API Key。' };
-    }
-
-    // 1.5 Simple greeting fast-path: skip AI call for trivial messages
-    const trimmedContent = content.trim();
-    if (isSimpleGreeting(trimmedContent)) {
-      return { reply: pickGreetingReply(trimmedContent) };
-    }
-
-    // 1.6 Block bare @mention without instruction
-    if (trimmedContent.startsWith('@')) {
-      const afterAt = trimmedContent.slice(1).trim();
-      const allEmps = await getAllEmployees();
-      const matchedEmp = allEmps.find((e: any) => e.name === afterAt);
-      if (matchedEmp) {
-        const hint = matchedEmp.first_prompt || '帮我完成一个任务';
-        return {
-          reply: `你提到了 ${afterAt}，请告诉我需要分配什么具体任务？例如：@${afterAt} ${hint}`,
-        };
-      }
-    }
-
-    // 2. Load secretary employee
-    step = 'getEmployeeById';
-    const secretary = await getEmployeeById('builtin-secretary');
-    if (!secretary) {
-      return { reply: '秘书服务暂时不可用，请稍后重试。' };
-    }
-
-    // 3. Load intent examples for Step 1 classification
-    step = 'loadIntentExamples';
-    let intentExamples: import('@/lib/services/intent-example-store').IntentExample[] = [];
-    try {
-      intentExamples = await loadIntentExamples(15);
-    } catch { /* never-throw */ }
-
-    // ========== Step 1: Lightweight intent classification ==========
-    step = 'classifyIntent';
-    const classification = await classifyIntent(trimmedContent, undefined, intentExamples, claudeConfig);
-    console.log(`[IMChannel] Step1 intent=${classification.intent}, target=${classification.target || 'N/A'}`);
-
-    // ========== Fast-path dispatch: target resolved → skip Step 2 ==========
-    if (classification.intent === 'dispatch' && classification.target) {
-      // Inline resolve: match target to employee ID
-      const allEmps = await getAllEmployees();
-      const resolvedId = resolveEmployeeIdFromTarget(classification.target, allEmps);
-      if (resolvedId) {
-        console.log(`[IMChannel] Fast-path dispatch: ${classification.target} → ${resolvedId}`);
-        const fastDecision: import('@/lib/services/secretary-core').AIDecision = {
-          action: 'dispatch',
-          employeeId: resolvedId,
-          instruction: trimmedContent,
-          confidence: 0.9,
-        };
-        const result = await executeDispatch(fastDecision, undefined, trimmedContent, classification.target);
-        return { reply: result.reply, actions: result.actions.length > 0 ? result.actions : undefined };
-      }
-    }
-
-    // ========== Step 2: Build detailed prompt based on intent ==========
-    step = 'buildDetailedPrompt';
-
-    // Load memory for personalization
-    const memory = await loadMemory();
-    let extraContext = '';
-    if (classification.intent !== 'skill_call') {
-      let memoryBlock = '';
-      if (trimmedContent.length > 4) {
-        const retrievalResults = searchMemory(trimmedContent, memory, 10);
-        memoryBlock = buildMemoryPromptBlockFromResults(retrievalResults);
-      }
-      const workEventsBlock = await getRecentWorkEvents(7);
-      let dispatchLearningsBlock = '';
-      try {
-        dispatchLearningsBlock = searchDispatchLearnings(trimmedContent, memory);
-      } catch { /* never-throw */ }
-      // Only inject intent examples for direct_reply
-      const intentExamplesBlock = classification.intent === 'direct_reply' ? formatIntentExamplesBlock(intentExamples) : '';
-      extraContext = [intentExamplesBlock, memoryBlock, workEventsBlock, dispatchLearningsBlock].filter(Boolean).join('\n\n');
-    }
-
-    const systemPrompt = await buildDetailedPrompt(
-      classification.intent,
-      secretary.system_prompt || '',
-      extraContext,
-      classification.target,
-    );
-
-    // 4. Build conversation messages from IM session history
-    step = 'buildMessages';
-    const conversationMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-
-    // Adjust history limit based on intent
-    const historyLimit = classification.intent === 'direct_reply' ? 6 : (classification.intent === 'skill_call' ? 0 : 2);
-    if (historyLimit > 0) {
-      const recentMessages = session.messages.slice(-historyLimit);
-      for (const msg of recentMessages) {
-        conversationMessages.push({ role: msg.role, content: msg.content });
-      }
-    }
-
-    // Add current message with time context
-    const now = new Date();
-    const datePrefix = `[当前时间: ${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]\n`;
-    conversationMessages.push({
-      role: 'user',
-      content: datePrefix + trimmedContent,
-    });
-
-    // 5. Call Claude API (Step 2)
-    step = 'callClaudeAPI';
-    const aiResponseText = await callClaudeAPI(systemPrompt, conversationMessages, claudeConfig);
-
-    // 6. Parse AI decision
-    step = 'parseAIDecision';
-    const decision = parseAIDecision(aiResponseText);
-
-    // 7. Execute action using shared core functions
-    step = `executeAction:${decision.action}`;
-    let reply: string;
-    let actions: SecretaryCoreResult['actions'] = [];
-
-    switch (decision.action) {
-      case 'dispatch': {
-        const result = await executeDispatch(decision, undefined, trimmedContent, classification.target);
-        reply = result.reply;
-        actions = result.actions;
-        break;
-      }
-      case 'skill_call': {
-        const result = await executeSkillCall(decision, undefined, trimmedContent, classification.target);
-        reply = result.reply;
-        actions = result.actions;
-        break;
-      }
-      case 'direct_reply':
-      default: {
-        reply = decision.reply || aiResponseText;
-        break;
-      }
-    }
-
-    return { reply, actions: actions.length > 0 ? actions : undefined };
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    const errStack = error instanceof Error ? error.stack : '';
-    console.error(`[IMChannel] callSecretaryCore error at step="${step}":`, errMsg, errStack);
-
-    // Also write to log file for easier debugging
-    try {
-      const { appendClaudeLog } = await import('@/lib/services/secretary-core');
-      appendClaudeLog({
-        timestamp: new Date().toISOString(),
-        model: 'im-channel-error',
-        systemPrompt: '',
-        messagesCount: 0,
-        lastUserMessage: content.slice(0, 500),
-        responseLength: 0,
-        responseText: '',
-        durationMs: 0,
-        error: `step=${step}: ${errMsg}`,
-      }).catch(() => {});
-    } catch { /* ignore */ }
-
-    return { reply: '抱歉，处理您的消息时出现了问题，请稍后重试。' };
-  }
-}
-
-/**
- * Resolve employee ID from Step 1 classification target string.
- * Matches by ID, name, or fuzzy substring.
- */
-function resolveEmployeeIdFromTarget(target: string, allEmployees: import('@/types/backend/employee').Employee[]): string | null {
-  // 1. Extract from "名称(id)" format
-  const parenMatch = target.match(/\(([^)]+)\)/);
-  if (parenMatch) {
-    const idCandidate = parenMatch[1];
-    if (allEmployees.some(e => e.id === idCandidate)) return idCandidate;
-  }
-  // 2. Direct ID match
-  const byId = allEmployees.find(e => e.id === target);
-  if (byId) return byId.id;
-  // 3. Name match
-  const byName = allEmployees.find(e => e.name === target);
-  if (byName) return byName.id;
-  // 4. Fuzzy match
-  const fuzzy = allEmployees.find(e => target.includes(e.name) || e.name.includes(target));
-  if (fuzzy) return fuzzy.id;
-  return null;
-}
-
 // ========== Main Processing Pipeline ==========
 
 /**
@@ -291,10 +88,9 @@ function resolveEmployeeIdFromTarget(target: string, allEmployees: import('@/typ
  * 1. Rate limit check
  * 2. Unsupported message type handling
  * 3. Load/create IM session
- * 4. Call Secretary core logic
- * 5. Format reply for platform
- * 6. Send reply (split if needed)
- * 7. Update session with new messages
+ * 4. Check ConversationContext for project routing
+ * 5. If project context exists → route to project
+ * 6. Otherwise → save to secretary session (no AI processing)
  */
 export async function processIMMessage(
   message: IMStandardMessage,
@@ -302,6 +98,16 @@ export async function processIMMessage(
   config: IMChannelConfig
 ): Promise<void> {
   const startTime = Date.now();
+
+  // ========== Message-level deduplication ==========
+  // Prevent duplicate processing if the same message is received twice
+  const dedupeKey = getMessageDedupeKey(message);
+  if (processedIMMessages.has(dedupeKey)) {
+    console.log(`[IMChannel] Duplicate message ignored | key=${dedupeKey}`);
+    return;
+  }
+  processedIMMessages.add(dedupeKey);
+  cleanupOldProcessedMessages();
 
   // 结构化日志辅助函数
   const emitLog = (fields: {
@@ -325,6 +131,9 @@ export async function processIMMessage(
       console.error(JSON.stringify(logEntry));
     }
   };
+
+  // Track whether AI reply has been triggered (to avoid duplicate error notifications)
+  let aiReplyTriggered = false;
 
   try {
     // 1. Rate limit check
@@ -353,15 +162,6 @@ export async function processIMMessage(
     // 3. Load/create IM session
     const session = await loadIMSession(message.platform, message.senderId);
 
-    // 3.1 立即推送用户消息到 SSE，让网页端实时看到 IM 来的消息
-    const timestamp = new Date().toISOString();
-    const imSource = message.platform as MessageSource;
-    const userMsg = { role: 'user' as const, content: message.content, timestamp, source: imSource };
-    try {
-      const { secretaryStream } = await import('@/lib/services/secretary-stream');
-      secretaryStream.publish({ type: 'new_message', data: { message: userMsg } });
-    } catch { /* ignore */ }
-
     // 3.5 检查 ConversationContext，决定路由到项目还是秘书
     try {
       const { getConversationContext } = await import('./conversation-context');
@@ -375,66 +175,40 @@ export async function processIMMessage(
       console.warn('[IMChannel] ConversationContext check failed, falling back to secretary:', ctxErr);
     }
 
-    // 4. Call Secretary core logic
-    const result = await callSecretaryCore(message.content, session);
+    // 4. 保存消息到数据库并触发 AI 处理
+    const timestamp = new Date().toISOString();
+    const requestId = randomUUID();
+    const userMsg = await createSecretaryMessage({
+      role: 'user',
+      messageType: 'text',
+      content: message.content,
+      senderId: message.senderId,
+      senderName: message.platform,
+      interactionMode: 'ai_chat',
+      requestId,
+    });
 
-    // 4.5 如果有 dispatch 动作，注册追踪以便任务完成后回推结果
-    if (result.actions) {
-      const { trackDispatch } = await import('@/lib/services/dispatch-tracker');
-      for (const act of result.actions) {
-        if (act.type === 'dispatch' && act.projectId) {
-          trackDispatch({
-            projectId: act.projectId,
-            employeeName: act.employeeName || act.employeeId || '员工',
-            source: message.platform as MessageSource,
-            imPlatform: message.platform,
-            imSenderId: message.senderId,
-            imRawPayload: message.rawPayload,
-            createdAt: Date.now(),
-          });
-        }
-      }
-    }
+    // 4.1 SSE 推送新消息
+    secretaryStream.publish({ type: 'new_message', data: { message: userMsg } });
+    console.log(`[IMChannel] 消息已保存到数据库: ${userMsg.id}`);
 
-    // 5. Format reply for platform
-    const formattedReply = formatReplyForPlatform(result.reply, message.platform);
+    // 4.2 触发 AI 流式执行（异步，不阻塞 IM 响应）
+    // Note: AI processing runs in background; if it fails, it will send error notification
+    handleIMSecretaryAIReply(message.content, requestId, adapter, config, message).catch((err: Error) => {
+      console.error('[IMChannel] AI reply failed:', err);
+      // AI processing failed, send error notification (since catch block below won't send it)
+      adapter.sendReply(
+        { ...replyBase(message), content: '抱歉，处理您的消息时出现了问题，请稍后重试。' },
+        config
+      ).catch(sendErr => console.error('[IMChannel] Failed to send AI error notification:', sendErr));
+    });
+    aiReplyTriggered = true;
 
-    // 6. Send reply (split if content exceeds platform limit)
-    const chunks = splitMessage(formattedReply, message.platform);
-    for (const chunk of chunks) {
-      await adapter.sendReply({ ...replyBase(message), content: chunk }, config);
-    }
-
-    // 7. Update IM session with new messages
-    session.messages.push(
-      { role: 'user', content: message.content, timestamp },
-      { role: 'assistant', content: result.reply, timestamp }
-    );
+    // 5. 更新 IM session
+    session.messages.push({ role: 'user', content: message.content, timestamp });
     await saveIMSession(session);
 
-    // 8. 同步写入秘书主会话，保证网页端能看到 IM 渠道的聊天记录
-    try {
-      const mainSession = await loadSession();
-      const assistantMsg = {
-        role: 'assistant' as const,
-        content: result.reply,
-        actions: result.actions,
-        timestamp,
-        source: imSource,
-      };
-      mainSession.messages.push(userMsg, assistantMsg);
-      await saveSession(mainSession);
-
-      // Push assistant reply via SSE (user message was already pushed in step 3.1)
-      const { secretaryStream } = await import('@/lib/services/secretary-stream');
-      secretaryStream.publish({ type: 'new_message', data: { message: assistantMsg } });
-    } catch (err) {
-      console.warn('[IMChannel] 同步秘书主会话失败:', err);
-    }
-
-    // 确定执行的动作类型
-    const action = result.actions?.[0]?.type ?? 'direct_reply';
-    emitLog({ action, success: true });
+    emitLog({ action: 'saved_to_secretary', success: true });
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     const errStack = error instanceof Error ? error.stack : '';
@@ -446,14 +220,19 @@ export async function processIMMessage(
       error: errMsg,
     });
 
-    // Try to send error notification to user
-    try {
-      await adapter.sendReply(
-        { ...replyBase(message), content: '抱歉，处理您的消息时出现了问题，请稍后重试。' },
-        config
-      );
-    } catch (sendError) {
-      console.error('[IMChannel] Failed to send error notification:', sendError);
+    // Only send error notification if AI processing hasn't been triggered yet
+    // If AI is already running in background, it will handle the response
+    if (!aiReplyTriggered) {
+      try {
+        await adapter.sendReply(
+          { ...replyBase(message), content: '抱歉，处理您的消息时出现了问题，请稍后重试。' },
+          config
+        );
+      } catch (sendError) {
+        console.error('[IMChannel] Failed to send error notification:', sendError);
+      }
+    } else {
+      console.log('[IMChannel] AI reply already triggered, skipping error notification to user');
     }
   }
 }
@@ -515,16 +294,26 @@ async function routeToProject(
       config
     );
 
-    // 同步写入秘书主会话
+    // 同步写入秘书数据库
     try {
-      const mainSession = await loadSession();
-      const timestamp = new Date().toISOString();
-      const imSource = message.platform as MessageSource;
-      mainSession.messages.push(
-        { role: 'user', content: `[回复${employeeName || '项目'}] ${message.content}`, timestamp, source: imSource },
-        { role: 'assistant', content: ack, timestamp, source: imSource }
-      );
-      await saveSession(mainSession);
+      const userMsg = await createSecretaryMessage({
+        role: 'user',
+        messageType: 'text',
+        content: `[回复${employeeName || '项目'}] ${message.content}`,
+        senderId: message.senderId,
+        senderName: message.platform,
+        interactionMode: 'plain',
+      });
+      const assistantMsg = await createSecretaryMessage({
+        role: 'assistant',
+        messageType: 'text',
+        content: ack,
+        senderId: 'secretary',
+        senderName: '秘书',
+        interactionMode: 'plain',
+      });
+      secretaryStream.publish({ type: 'new_message', data: { message: userMsg } });
+      secretaryStream.publish({ type: 'new_message', data: { message: assistantMsg } });
     } catch { /* ignore */ }
 
     // 注册 dispatch 追踪（以便任务完成后回推结果）
@@ -532,7 +321,7 @@ async function routeToProject(
     trackDispatch({
       projectId,
       employeeName: employeeName || '员工',
-      source: message.platform as MessageSource,
+      source: message.platform as import('@/lib/services/secretary-session').MessageSource,
       imPlatform: message.platform,
       imSenderId: message.senderId,
       imRawPayload: message.rawPayload,
@@ -575,13 +364,132 @@ async function routeToProject(
       config
     );
 
-    // 回退到秘书处理
-    const session = await loadIMSession(message.platform, message.senderId);
-    const result = await callSecretaryCore(message.content, session);
-    const formattedReply = formatReplyForPlatform(result.reply, message.platform);
-    const chunks = splitMessage(formattedReply, message.platform);
-    for (const chunk of chunks) {
-      await adapter.sendReply({ ...replyBase(message), content: chunk }, config);
+    // 回退：将消息保存到数据库，等待用户处理
+    try {
+      const fallbackMsg = await createSecretaryMessage({
+        role: 'user',
+        messageType: 'text',
+        content: `[路由失败，请重新处理] ${message.content}`,
+        senderId: message.senderId,
+        senderName: message.platform,
+        interactionMode: 'plain',
+      });
+      secretaryStream.publish({ type: 'new_message', data: { message: fallbackMsg } });
+      console.log(`[IMChannel] 消息已保存到数据库（路由失败回退）: ${fallbackMsg.id}`);
+    } catch (saveErr) {
+      console.warn('[IMChannel] 回退保存秘书会话失败:', saveErr);
     }
+  }
+}
+
+// ========== IM Secretary AI Reply Handler ==========
+
+/**
+ * 处理 IM 消息的 AI 回复流程
+ * 参考 /api/secretary/messages/route.ts 的 handleAIReply 实现
+ */
+async function handleIMSecretaryAIReply(
+  content: string,
+  requestId: string,
+  adapter: IMAdapterBase,
+  config: IMChannelConfig,
+  originalMessage: IMStandardMessage
+): Promise<void> {
+  // Deduplication: Prevent duplicate IM replies for the same requestId
+  if (imReplyLocks.has(requestId)) {
+    console.log(`[IMChannel] Duplicate AI reply request ignored | request=${requestId}`);
+    return;
+  }
+  imReplyLocks.add(requestId);
+  cleanupOldLocks();
+
+  console.log(`[IMChannel] Starting AI reply | request=${requestId}`);
+
+  // 1. 标记流开始并获取 abort controller
+  const abortController = secretaryStream.markStreamActive(requestId);
+
+  // 2. 发送 ai_stream_start 事件，通知前端 AI 正在执行
+  secretaryStream.publish({
+    type: 'ai_stream_start',
+    data: { requestId, timestamp: new Date().toISOString() },
+  });
+
+  let persistSuccess = false;
+
+  try {
+    // 3. 加载启用的技能
+    let enabledSkills: string[] = [];
+    try {
+      const { getSecretaryEnabledSkills } = await import('@/lib/services/secretary/secretary-settings');
+      enabledSkills = await getSecretaryEnabledSkills();
+    } catch {
+      enabledSkills = [];
+    }
+
+    // 4. 执行 Claude Agent SDK (isIMMode=true 禁用自动派发)
+    const result = await executeSecretaryClaude({
+      message: content,
+      enabledSkills,
+      requestId,
+      abortSignal: abortController.signal,
+      isIMMode: true,
+    });
+
+    // 5. 如果有回复，持久化到数据库并推送事件
+    if (result.reply && result.reply.trim()) {
+      const aiMessage = await createSecretaryMessage({
+        role: 'assistant',
+        messageType: 'text',
+        content: result.reply.trim(),
+        senderId: SECRETARY_SENDER_ID,
+        senderName: SECRETARY_SENDER_NAME,
+        interactionMode: 'ai_chat',
+        requestId,
+      });
+
+      persistSuccess = true;
+
+      // 5.1 SSE 推送 AI 回复消息
+      secretaryStream.publish({
+        type: 'new_message',
+        data: { message: aiMessage },
+      });
+
+      console.log(`[IMChannel] AI reply persisted and published | request=${requestId}`);
+
+      // 5.2 向 IM 用户发送回复
+      try {
+        await adapter.sendReply(
+          {
+            platform: originalMessage.platform,
+            conversationId: originalMessage.conversationId,
+            senderId: originalMessage.senderId,
+            rawPayload: originalMessage.rawPayload,
+            content: result.reply.trim(),
+          },
+          config
+        );
+        console.log(`[IMChannel] AI reply sent to IM user | request=${requestId}`);
+      } catch (sendErr) {
+        console.error('[IMChannel] Failed to send AI reply to IM:', sendErr);
+      }
+    } else {
+      persistSuccess = true; // No reply to persist is considered success
+    }
+  } catch (err) {
+    console.error(`[IMChannel] handleIMSecretaryAIReply error | request=${requestId}:`, err);
+  } finally {
+    // 6. 标记流结束
+    secretaryStream.markStreamDone(requestId);
+
+    // 7. 发送 ai_stream_end 事件
+    secretaryStream.publish({
+      type: 'ai_stream_end',
+      data: {
+        requestId,
+        timestamp: new Date().toISOString(),
+        persistSuccess,
+      },
+    });
   }
 }

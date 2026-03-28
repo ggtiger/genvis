@@ -174,6 +174,24 @@ export const lanMessages = sqliteTable('lan_messages', {
   sessionIdIdx: index('idx_lan_messages_session_id').on(table.sessionId),
 }));
 
+// Secretary Messages table (secretary chat messages — separate from project messages)
+export const secretaryMessages = sqliteTable('secretary_messages', {
+  id: text('id').primaryKey(),
+  role: text('role').notNull(),                     // 'user' | 'assistant' | 'system'
+  messageType: text('message_type').notNull(),       // 'text' | 'tool_use' | 'tool_result' | 'system'
+  content: text('content').notNull(),
+  senderId: text('sender_id'),
+  senderName: text('sender_name'),
+  interactionMode: text('interaction_mode'),         // 'plain' | 'mention' | 'no_ai' | 'skill_invoke'
+  metadataJson: text('metadata_json'),               // JSON string for actions, images, etc.
+  requestId: text('request_id'),
+  createdAt: text('created_at').notNull(),
+}, (table) => ({
+  createdAtIdx: index('idx_secretary_messages_created_at').on(table.createdAt),
+  roleIdx: index('idx_secretary_messages_role').on(table.role),
+  requestIdIdx: index('idx_secretary_messages_request_id').on(table.requestId),
+}));
+
 // ServiceTokens table
 export const serviceTokens = sqliteTable('service_tokens', {
   id: text('id').primaryKey(),

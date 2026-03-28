@@ -9,11 +9,10 @@
 import {
   loadScheduledMessages,
   saveScheduledMessages,
-  loadSession,
-  saveSession,
-  type SecretaryMessage,
   type SecretaryScheduledMessage,
 } from './secretary-session';
+import { createSecretaryMessage } from './secretary/secretary-message-service';
+import { secretaryStream } from './secretary-stream';
 
 const CHECK_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -112,32 +111,78 @@ function isDue(sm: SecretaryScheduledMessage, now: number): boolean {
 
 /**
  * Send a scheduled message to the secretary chat.
- * If aiReply is true, sends via the secretary API so AI processes it.
+ * If aiReply is true, uses the new Claude Agent SDK via executeSecretaryClaude().
  * Otherwise, directly appends to the session.
  */
 async function sendScheduledMessage(content: string, aiReply: boolean): Promise<void> {
   const { secretaryStream } = await import('./secretary-stream');
 
   if (aiReply) {
-    // Send through the secretary API so AI processes and responds
+    // Use the new Claude Agent SDK for AI processing
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE || '';
-      const baseUrl = apiBase || `http://localhost:${process.env.PORT || 3000}`;
+      const { executeSecretaryClaude } = await import('./secretary/secretary-claude');
+      const { createSecretaryMessage } = await import('./secretary/secretary-message-service');
+      const { randomUUID } = await import('crypto');
 
-      const res = await fetch(`${baseUrl}/api/chat/home/secretary`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `[定时任务] ${content}`,
-        }),
+      const requestId = randomUUID();
+      const messageContent = `[定时任务] ${content}`;
+
+      // Create and persist user message
+      const userMessage = await createSecretaryMessage({
+        role: 'user',
+        messageType: 'text',
+        content: messageContent,
+        senderId: 'scheduled-task',
+        senderName: '定时任务',
+        interactionMode: 'ai_chat',
+        requestId,
       });
 
-      if (res.ok) {
-        console.log(`[SecretaryScheduler] AI message sent: ${content.slice(0, 50)}`);
-      } else {
-        // Fallback: write directly to session
-        await appendDirectly(content, '定时消息已触发，AI处理失败，请稍后重试。');
+      // Publish new message event
+      secretaryStream.publish({
+        type: 'new_message',
+        data: { message: userMessage },
+      });
+
+      // Notify frontend that AI streaming is starting
+      secretaryStream.publish({
+        type: 'ai_stream_start',
+        data: { requestId, timestamp: new Date().toISOString() },
+      });
+
+      // Execute Claude Agent SDK
+      const result = await executeSecretaryClaude({
+        message: messageContent,
+        enabledSkills: [],
+        requestId,
+      });
+
+      // If we have a reply, persist to database
+      if (result.reply && result.reply.trim()) {
+        const aiMessage = await createSecretaryMessage({
+          role: 'assistant',
+          messageType: 'text',
+          content: result.reply.trim(),
+          senderId: 'secretary-ai',
+          senderName: '秘书',
+          interactionMode: 'ai_chat',
+          requestId,
+        });
+
+        // Publish the final AI message
+        secretaryStream.publish({
+          type: 'new_message',
+          data: { message: aiMessage },
+        });
       }
+
+      // Always send ai_stream_end
+      secretaryStream.publish({
+        type: 'ai_stream_end',
+        data: { requestId, timestamp: new Date().toISOString() },
+      });
+
+      console.log(`[SecretaryScheduler] AI message processed via Agent SDK: ${content.slice(0, 50)}`);
     } catch (err) {
       console.error('[SecretaryScheduler] AI send failed:', err);
       await appendDirectly(content, '定时消息已触发，AI处理失败，请稍后重试。');
@@ -158,30 +203,33 @@ async function sendScheduledMessage(content: string, aiReply: boolean): Promise<
 }
 
 /**
- * Append a scheduled message directly to the session (no AI processing).
+ * Append a scheduled message directly to the database (no AI processing).
  */
 async function appendDirectly(content: string, assistantReply?: string): Promise<void> {
   try {
-    const session = await loadSession();
-    const userMsg: SecretaryMessage = {
+    const userMsg = await createSecretaryMessage({
       role: 'user',
+      messageType: 'text',
       content: `[定时任务] ${content}`,
-      timestamp: new Date().toISOString(),
-      source: 'web',
-    };
-    session.messages.push(userMsg);
+      senderId: 'scheduled-task',
+      senderName: '定时任务',
+      interactionMode: 'plain',
+    });
+
+    // SSE push
+    secretaryStream.publish({ type: 'new_message', data: { message: userMsg } });
 
     if (assistantReply) {
-      const asstMsg: SecretaryMessage = {
+      const asstMsg = await createSecretaryMessage({
         role: 'assistant',
+        messageType: 'text',
         content: `⏰ ${assistantReply}`,
-        timestamp: new Date().toISOString(),
-        source: 'web',
-      };
-      session.messages.push(asstMsg);
+        senderId: 'secretary',
+        senderName: '秘书',
+        interactionMode: 'plain',
+      });
+      secretaryStream.publish({ type: 'new_message', data: { message: asstMsg } });
     }
-
-    await saveSession(session);
   } catch (err) {
     console.warn('[SecretaryScheduler] appendDirectly failed:', err);
   }

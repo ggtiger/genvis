@@ -16,11 +16,10 @@
  */
 
 import {
-  loadSession,
-  saveSession,
-  type SecretaryMessage,
   type SecretaryAction,
 } from './secretary-session';
+import { createSecretaryMessage } from './secretary/secretary-message-service';
+import { secretaryStream } from './secretary-stream';
 import {
   isSimpleGreeting,
   pickGreetingReply,
@@ -257,30 +256,30 @@ async function appendToSession(
   actions?: SecretaryAction[],
 ): Promise<void> {
   try {
-    const session = await loadSession();
-    const timestamp = new Date().toISOString();
-    const userMsg: SecretaryMessage = {
+    // Save user message to database
+    const userMsg = await createSecretaryMessage({
       role: 'user',
+      messageType: 'text',
       content: `[来自技能 ${skillName}] ${userContent}`,
-      timestamp,
-      source: 'skill',
-    };
-    const assistantMsg: SecretaryMessage = {
+      senderId: skillName,
+      senderName: skillName,
+      interactionMode: 'skill_invoke',
+    });
+
+    // Save assistant message to database
+    const assistantMsg = await createSecretaryMessage({
       role: 'assistant',
+      messageType: 'text',
       content: assistantContent,
-      actions,
-      timestamp,
-      source: 'skill',
-    };
-    session.messages.push(userMsg, assistantMsg);
-    await saveSession(session);
+      senderId: 'secretary',
+      senderName: '秘书',
+      interactionMode: 'skill_invoke',
+      metadata: actions ? { actions } : undefined,
+    });
 
     // SSE 推送
-    try {
-      const { secretaryStream } = await import('./secretary-stream');
-      secretaryStream.publish({ type: 'new_message', data: { message: userMsg } });
-      secretaryStream.publish({ type: 'new_message', data: { message: assistantMsg } });
-    } catch { /* ignore */ }
+    secretaryStream.publish({ type: 'new_message', data: { message: userMsg } });
+    secretaryStream.publish({ type: 'new_message', data: { message: assistantMsg } });
   } catch (err) {
     console.warn('[SkillChannel] 写入会话失败:', err);
   }

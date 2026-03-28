@@ -10,7 +10,7 @@ import AnimatedBackground from '@/components/layout/AnimatedBackground';
 import ChatInput from '@/components/chat/ChatInput';
 import EmployeeList from '@/components/employees/EmployeeList';
 import EmployeeStatusPanel from '@/components/boss/EmployeeStatusPanel';
-import HomeChatPanel from '@/components/secretary/HomeChatPanel';
+import SecretaryPanel from '@/components/secretary/SecretaryPanel';
 import HomeDashboard from '@/components/secretary/HomeDashboard';
 import LanChatLayout from '@/components/lan-chat/LanChatLayout';
 import EmbeddedPageView from '@/components/layout/EmbeddedPageView';
@@ -839,10 +839,8 @@ function WorkspaceContent() {
                   </div>
                 </header>
                 {/* Chat Panel fills the rest */}
-                <div className="flex-1 overflow-hidden">
-                  <HomeChatPanel
-                    onActionComplete={() => setSecretaryRefreshTrigger((prev) => prev + 1)}
-                  />
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                  <SecretaryPanel />
                 </div>
               </main>
               {/* Right Sidebar - Dashboard */}
