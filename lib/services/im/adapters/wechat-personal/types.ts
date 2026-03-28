@@ -51,12 +51,128 @@ export interface MessageItem {
     text?: string;
   };
   image_item?: {
+    /** 图片 URL (旧格式) */
     url?: string;
+    /** 图片宽度 */
+    width?: number;
+    /** 图片高度 */
+    height?: number;
+    /** 文件大小 */
+    size?: number;
+    /** 加密媒体信息 (ilink 协议) */
+    media?: {
+      /** 加密查询参数 (CDN 下载用) */
+      encrypt_query_param?: string;
+      /** AES 解密密钥 (base64) */
+      aes_key?: string;
+    };
   };
   file_item?: {
+    /** 文件 URL */
     file_url?: string;
+    /** 文件名 */
     file_name?: string;
+    /** 文件大小 */
     file_size?: number;
+    /** 加密媒体信息 (ilink 协议) */
+    media?: {
+      /** 加密查询参数 (CDN 下载用) */
+      encrypt_query_param?: string;
+      /** AES 解密密钥 (base64) */
+      aes_key?: string;
+    };
+  };
+  voice_item?: {
+    /** Voice file URL (legacy format) */
+    url?: string;
+    /** Duration in milliseconds */
+    length?: number;
+    /** Voice format (silk, amr, etc.) */
+    format?: string;
+    /** File size in bytes */
+    size?: number;
+    /** Encrypted media info (ilink protocol) */
+    media?: {
+      /** Encrypted query parameter for CDN download */
+      encrypt_query_param?: string;
+      /** AES key for decryption (base64) */
+      aes_key?: string;
+    };
+    /** Encoding type (4 = silk) */
+    encode_type?: number;
+    /** Bits per sample */
+    bits_per_sample?: number;
+    /** Sample rate */
+    sample_rate?: number;
+    /** Play time in milliseconds */
+    playtime?: number;
+    /** Voice-to-text transcription */
+    text?: string;
+  };
+}
+
+/** 语音消息体（顶层格式） */
+export interface VoiceItem {
+  /** Voice file URL (legacy format) */
+  url?: string;
+  /** Duration in milliseconds */
+  length?: number;
+  /** Voice format (silk, amr, etc.) */
+  format?: string;
+  /** File size in bytes */
+  size?: number;
+  /** Encrypted media info (ilink protocol) */
+  media?: {
+    /** Encrypted query parameter for CDN download */
+    encrypt_query_param?: string;
+    /** AES key for decryption (base64) */
+    aes_key?: string;
+  };
+  /** Encoding type (4 = silk) */
+  encode_type?: number;
+  /** Bits per sample */
+  bits_per_sample?: number;
+  /** Sample rate */
+  sample_rate?: number;
+  /** Play time in milliseconds */
+  playtime?: number;
+  /** Voice-to-text transcription */
+  text?: string;
+}
+
+/** 图片消息体（顶层格式） */
+export interface ImageItem {
+  /** 图片 URL (旧格式) */
+  url?: string;
+  /** 图片宽度 */
+  width?: number;
+  /** 图片高度 */
+  height?: number;
+  /** 文件大小 */
+  size?: number;
+  /** 加密媒体信息 (ilink 协议) */
+  media?: {
+    /** 加密查询参数 (CDN 下载用) */
+    encrypt_query_param?: string;
+    /** AES 解密密钥 (base64) */
+    aes_key?: string;
+  };
+}
+
+/** 文件消息体（顶层格式） */
+export interface FileItem {
+  /** 文件 URL */
+  url?: string;
+  /** 文件名 */
+  file_name?: string;
+  /** 文件大小 */
+  file_size?: number;
+  /** 加密媒体信息 (ilink 协议) */
+  media?: {
+    /** 加密查询参数 (CDN 下载用) */
+    encrypt_query_param?: string;
+    /** AES 解密密钥 (base64) */
+    aes_key?: string;
   };
 }
 
@@ -73,6 +189,17 @@ export interface WeixinMessage {
   message_state?: number;
   item_list?: MessageItem[];
   context_token?: string;
+  /** 消息内容类型（顶层格式，用于单条消息如语音/图片） */
+  type?: number;
+  /** 语音消息内容（顶层格式） */
+  voice_item?: VoiceItem;
+  /** 图片消息内容（顶层格式） */
+  image_item?: ImageItem;
+  /** 文件消息内容（顶层格式） */
+  file_item?: FileItem;
+  /** 是否完成 */
+  is_completed?: boolean;
+  update_time_ms?: number;
 }
 
 /** base_info 附加在每个 API 请求体中 */

@@ -1109,6 +1109,25 @@ function registerIpcHandlers() {
     }
   });
 
+  // Open file with system default application
+  ipcMain.handle('open-file', async (event, filePath) => {
+    if (!filePath || typeof filePath !== 'string') {
+      return { success: false, error: 'Invalid file path' };
+    }
+
+    try {
+      const result = await shell.openPath(filePath);
+      // shell.openPath returns empty string on success, error message on failure
+      if (result) {
+        return { success: false, error: result };
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to open file:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Set window size (for slim mode)
   ipcMain.handle('set-window-size', async (event, { width, height, minWidth, minHeight } = {}) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender);

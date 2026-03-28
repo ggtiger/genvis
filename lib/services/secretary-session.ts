@@ -65,6 +65,14 @@ export interface SecretaryScheduledMessage {
   aiReply: boolean;          // whether AI should process the message
   enabled: boolean;
   lastSentAt?: number;       // epoch ms
+  /** Whether to send the result to IM channel */
+  sendToIM?: boolean;
+  /** Target IM platform (wechat_personal, dingtalk, feishu, qq) */
+  imPlatform?: string;
+  /** Target conversation ID (user_id / group_id) */
+  imConversationId?: string;
+  /** Display name for the conversation (optional, for UI) */
+  imConversationName?: string;
 }
 
 export interface SecretarySession {

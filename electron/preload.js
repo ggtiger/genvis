@@ -77,6 +77,9 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   // Open folder in system file manager
   openFolder: (folderPath) => ipcRenderer.invoke('open-folder', folderPath),
 
+  // Open file with system default application
+  openFile: (filePath) => ipcRenderer.invoke('open-file', filePath),
+
   // Open new window with options
   openNewWindow: (options) => ipcRenderer.invoke('open-new-window', options),
 

@@ -240,6 +240,37 @@ async function handleAIReply(
           data: { message: aiMessage },
         });
         console.log(`[Secretary API] AI reply persisted and published | request=${requestId}`);
+        
+        // Fire-and-forget: extract memory from conversation
+        (async () => {
+          try {
+            const { extractMemoryFromConversation } = await import('@/lib/services/secretary-memory-extractor');
+            const { loadMemory, upsertEntry, saveMemory } = await import('@/lib/services/secretary-memory');
+            const { loadClaudeConfig } = await import('@/lib/services/secretary-core');
+            
+            const claudeConfig = await loadClaudeConfig();
+            const extractedItems = await extractMemoryFromConversation(
+              content.trim(),
+              result.reply.trim(),
+              {
+                baseUrl: claudeConfig.baseUrl,
+                apiKey: claudeConfig.apiKey,
+                model: claudeConfig.model,
+              }
+            );
+            
+            if (extractedItems.length > 0) {
+              let mem: any = await loadMemory();
+              for (const item of extractedItems) {
+                mem = upsertEntry(mem, item.category as any, item);
+              }
+              await saveMemory(mem);
+              console.log(`[Secretary API] \uD83E\uDDE0 Extracted and saved ${extractedItems.length} memory items`);
+            }
+          } catch (err) {
+            console.warn('[Secretary API] Memory extraction failed:', err);
+          }
+        })();
       } else {
         // Notify frontend of persist failure via error event
         console.error(`[Secretary API] AI reply persist failed, notifying frontend | request=${requestId}`);

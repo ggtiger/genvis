@@ -107,22 +107,6 @@
       "parameters": [
         { "name": "query", "type": "string", "required": true, "description": "自然语言查询内容" }
       ]
-    },
-    {
-      "path": "/api/scheduled-tasks",
-      "method": "GET",
-      "description": "查询定时任务列表"
-    },
-    {
-      "path": "/api/scheduled-tasks",
-      "method": "POST",
-      "description": "创建定时任务（到期自动发送消息给秘书）",
-      "parameters": [
-        { "name": "name", "type": "string", "required": true, "description": "任务名称" },
-        { "name": "message", "type": "string", "required": true, "description": "到期时发送给秘书的消息内容" },
-        { "name": "triggerTime", "type": "string", "required": false, "description": "触发时间 ISO 格式" },
-        { "name": "repeatType", "type": "string", "required": false, "description": "重复类型: once/daily/weekly/monthly" }
-      ]
     }
   ]
 }

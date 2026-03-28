@@ -34,12 +34,25 @@ export async function register() {
       console.error('[Instrumentation] Failed to initialize LAN peer manager:', error);
     });
 
+    // Initialize Secretary Scheduler for scheduled messages
+    const { startSecretaryScheduler } = await import('@/lib/services/secretary-scheduler');
+    startSecretaryScheduler();
+
     // Register cleanup handlers to stop all preview child processes on exit
     let cleaningUp = false;
     const cleanup = async () => {
       if (cleaningUp) return;
       cleaningUp = true;
       console.log('[Instrumentation] Cleaning up child processes...');
+
+      // Stop secretary scheduler first
+      try {
+        const { stopSecretaryScheduler } = await import('@/lib/services/secretary-scheduler');
+        stopSecretaryScheduler();
+        console.log('[Instrumentation] Secretary scheduler stopped');
+      } catch (error) {
+        console.error('[Instrumentation] Scheduler stop error:', error);
+      }
       try {
         const { deployManager } = await import('@/lib/services/deploy-manager');
         await deployManager.stopAll();

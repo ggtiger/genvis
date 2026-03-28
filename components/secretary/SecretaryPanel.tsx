@@ -30,24 +30,130 @@ import {
   MicOff,
   User,
   FileText as FileTextIcon,
+  Send,
 } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import type { Employee } from '@/types/backend/employee';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import VoicePlayer from './VoicePlayer';
 
 const API_BASE = '';
+
+// ========== Helper Functions ==========
+
+/** Format file size to human readable string */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+/** Get file icon based on file type */
+function getFileIcon(fileType: string): React.ReactNode {
+  const type = fileType?.toLowerCase() || '';
+  // PDF
+  if (type.includes('pdf')) {
+    return (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <path d="M10 12h4" />
+        <path d="M10 16h4" />
+      </svg>
+    );
+  }
+  // Word documents
+  if (type.includes('doc') || type.includes('word')) {
+    return (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+        <line x1="10" y1="9" x2="8" y2="9" />
+      </svg>
+    );
+  }
+  // Excel/Spreadsheet
+  if (type.includes('xls') || type.includes('excel') || type.includes('spreadsheet') || type.includes('csv')) {
+    return (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <rect x="8" y="12" width="8" height="6" />
+      </svg>
+    );
+  }
+  // PowerPoint
+  if (type.includes('ppt') || type.includes('presentation')) {
+    return (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <rect x="8" y="11" width="8" height="5" rx="1" />
+      </svg>
+    );
+  }
+  // Archive files
+  if (type.includes('zip') || type.includes('rar') || type.includes('7z') || type.includes('tar') || type.includes('gz')) {
+    return (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        <line x1="12" y1="11" x2="12" y2="17" />
+        <line x1="9" y1="14" x2="15" y2="14" />
+      </svg>
+    );
+  }
+  // Images
+  if (type.includes('image') || type.includes('jpg') || type.includes('jpeg') || type.includes('png') || type.includes('gif') || type.includes('webp')) {
+    return (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <circle cx="9" cy="9" r="2" />
+        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+      </svg>
+    );
+  }
+  // Video
+  if (type.includes('video') || type.includes('mp4') || type.includes('avi') || type.includes('mov')) {
+    return (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polygon points="23 7 16 12 23 17 23 7" />
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+      </svg>
+    );
+  }
+  // Audio
+  if (type.includes('audio') || type.includes('mp3') || type.includes('wav') || type.includes('m4a')) {
+    return (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </svg>
+    );
+  }
+  // Default file icon
+  return (
+    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+    </svg>
+  );
+}
 
 // ========== Types ==========
 
 interface SecretaryMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
-  messageType: 'text' | 'tool_use' | 'tool_result' | 'system' | 'skill_result';
+  messageType: 'text' | 'tool_use' | 'tool_result' | 'system' | 'skill_result' | 'image' | 'file' | 'voice';
   content: string;
   senderId: string;
   senderName: string;
-  interactionMode?: 'mention' | 'no_ai' | 'skill_invoke' | 'text';
+  interactionMode?: 'mention' | 'no_ai' | 'skill_invoke' | 'text' | 'plain' | 'ai_chat';
   requestId?: string;
   toolStatus?: 'pending' | 'completed'; // pending: executing, completed: done
   toolKey?: string; // unique key for matching tool_use with tool_result
@@ -58,9 +164,31 @@ interface SecretaryMessage {
       error?: string;
     };
     fileInfo?: {
+      id?: string | null;
+      url?: string | null;
+      localPath?: string | null;
       name: string;
-      size: number;
-      mimeType: string;
+      size?: number | null;
+      mimeType?: string | null;
+      fileType?: string | null;
+      downloadError?: string | null;
+    };
+    voiceInfo?: {
+      id: string;
+      url: string;
+      duration: number;
+      format: string;
+      size?: number;
+      transcription?: string;
+    };
+    imageInfo?: {
+      id?: string | null;
+      url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      format?: string | null;
+      size?: number | null;
+      downloadError?: string | null;
     };
     toolResponse?: string;
     toolError?: string;
@@ -85,6 +213,20 @@ interface SecretaryScheduledMessage {
   aiReply: boolean;
   enabled: boolean;
   lastSentAt?: number;
+  /** Whether to send the result to IM channel */
+  sendToIM?: boolean;
+  /** Target IM platform (wechat_personal, dingtalk, feishu, qq) */
+  imPlatform?: string;
+  /** Target conversation ID (user_id / group_id) */
+  imConversationId?: string;
+  /** Display name for the conversation (optional, for UI) */
+  imConversationName?: string;
+}
+
+interface IMChannelStatus {
+  platform: string;
+  connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+  configured: boolean;
 }
 
 interface SkillInfo {
@@ -111,6 +253,17 @@ const ACTION_CONFIG: Record<ToolAction, { icon: React.ComponentType<{ className?
 
 function getActionConfig(action?: string) {
   return ACTION_CONFIG[(action as ToolAction)] || ACTION_CONFIG.Executed;
+}
+
+/** Get display name for IM platform */
+function getPlatformDisplayName(platform: string): string {
+  const platformNames: Record<string, string> = {
+    wechat_personal: '微信个人号',
+    dingtalk: '钉钉',
+    feishu: '飞书',
+    qq: 'QQ',
+  };
+  return platformNames[platform] || platform;
 }
 
 function truncatePath(p?: string, max = 50): string {
@@ -190,7 +343,7 @@ const mdComponents = {
 
 // ========== Formatted Message Content ==========
 
-function FormattedMessageContent({ content, interactionMode }: { content: string; interactionMode?: 'mention' | 'no_ai' | 'skill_invoke' | 'text' }) {
+function FormattedMessageContent({ content, interactionMode }: { content: string; interactionMode?: 'mention' | 'no_ai' | 'skill_invoke' | 'text' | 'plain' | 'ai_chat' }) {
   // Handle # prefix for no_ai mode
   const displayContent = (() => {
     const trimmed = content.trim();
@@ -592,11 +745,157 @@ function SecretaryMessageBubble({ message, isStreaming }: { message: SecretaryMe
             </div>
           )}
         </div>
-        {message.metadata?.fileInfo && (
-          <div className="mt-1 flex items-center gap-2 px-3 py-2 bg-white/30 dark:bg-slate-800/30 rounded-lg border border-border-subtle text-xs">
-            {message.metadata.fileInfo.mimeType?.startsWith('image/') ? '🖼️' : '📎'}
-            <span className="truncate">{message.metadata.fileInfo.name}</span>
-            <span className="text-text-secondary">({(message.metadata.fileInfo.size / 1024).toFixed(1)}KB)</span>
+        {/* Image message rendering */}
+        {message.metadata?.imageInfo && (
+          <div className="mt-2 max-w-xs">
+            {message.metadata.imageInfo.url ? (
+              <div className="relative group">
+                <img
+                  src={message.metadata.imageInfo.url}
+                  alt="图片消息"
+                  className="rounded-lg max-w-full cursor-pointer hover:opacity-90 transition-opacity border border-border-subtle"
+                  style={{
+                    maxWidth: Math.min(message.metadata.imageInfo.width || 300, 300),
+                    maxHeight: 400,
+                  }}
+                  onClick={() => window.open(message.metadata?.imageInfo?.url || '', '_blank')}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                    (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                  }}
+                />
+                <div className="hidden p-4 bg-red-50 dark:bg-red-500/10 rounded-lg text-red-600 dark:text-red-400 text-xs">
+                  图片加载失败
+                </div>
+                <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    className="p-1.5 bg-black/50 hover:bg-black/70 rounded-full text-white"
+                    onClick={(e) => { e.stopPropagation(); window.open(message.metadata?.imageInfo?.url || '', '_blank'); }}
+                    title="查看原图"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M15 3h6v6M14 10l6.1-6.1M9 21H3v-6M10 14l-6.1 6.1" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 bg-gray-100 dark:bg-slate-700 rounded-lg text-text-secondary text-xs flex items-center gap-2">
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <circle cx="9" cy="9" r="2" />
+                  <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                </svg>
+                <span>图片{message.metadata.imageInfo.downloadError ? ' - 加载失败' : ''}</span>
+              </div>
+            )}
+          </div>
+        )}
+        {/* File attachment rendering */}
+        {message.metadata?.fileInfo && ((
+          () => {
+            const fileInfo = message.metadata.fileInfo;
+            const hasLocalPath = !!fileInfo.localPath;
+            const isElectron = typeof window !== 'undefined' && 'desktopAPI' in window;
+            const canOpenLocally = hasLocalPath && isElectron;
+
+            const handleClick = async () => {
+              if (canOpenLocally) {
+                // Electron environment: open file with system default app
+                try {
+                  const result = await (window as any).desktopAPI.openFile(fileInfo.localPath);
+                  if (!result.success) {
+                    console.error('Failed to open file:', result.error);
+                    // Fallback to download if open fails
+                    if (fileInfo.url) {
+                      const a = document.createElement('a');
+                      a.href = `${fileInfo.url}?download=true`;
+                      a.download = fileInfo.name || 'download';
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }
+                  }
+                } catch (err) {
+                  console.error('Error opening file:', err);
+                }
+              } else if (fileInfo.url) {
+                // Web environment: trigger download
+                const a = document.createElement('a');
+                a.href = `${fileInfo.url}?download=true`;
+                a.download = fileInfo.name || 'download';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              }
+            };
+
+            return (
+              <div
+                className="mt-2 flex items-center gap-3 px-3 py-2.5 bg-white/40 dark:bg-slate-800/40 rounded-lg border border-border-subtle hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors cursor-pointer max-w-xs"
+                onClick={handleClick}
+              >
+                {/* File type icon */}
+                <div className="w-10 h-10 flex items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 shrink-0">
+                  {getFileIcon(fileInfo.fileType || fileInfo.mimeType || '')}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{fileInfo.name}</div>
+                  <div className="text-xs text-text-secondary">
+                    {fileInfo.size ? formatFileSize(fileInfo.size) : '未知大小'}
+                    {fileInfo.downloadError && <span className="text-red-500 ml-2">下载失败</span>}
+                  </div>
+                </div>
+                {/* Show "Open" button for local files, download icon for web */}
+                {canOpenLocally ? (
+                  <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-medium shrink-0">
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 3l14 9-14 9V3z" fill="currentColor" />
+                    </svg>
+                    打开
+                  </div>
+                ) : fileInfo.url ? (
+                  <svg className="w-5 h-5 text-text-secondary shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                ) : null}
+              </div>
+            );
+          }
+        )())}
+        {message.metadata?.voiceInfo && (
+          <div className="mt-1.5 w-full max-w-xs">
+            {message.metadata.voiceInfo.url ? (
+              <VoicePlayer
+                url={message.metadata.voiceInfo.url}
+                duration={message.metadata.voiceInfo.duration}
+                transcription={message.metadata.voiceInfo.transcription}
+              />
+            ) : (
+              /* Voice message without audio file (download failed) - show simplified player */
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 dark:bg-slate-700 text-text-secondary">
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <line x1="12" x2="12" y1="19" y2="22" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 h-1.5 bg-gray-200 dark:bg-slate-600 rounded-full" />
+                  <span className="text-[11px] text-text-secondary min-w-[40px] text-right tabular-nums">
+                    {message.metadata.voiceInfo.duration ? `0:${String(message.metadata.voiceInfo.duration).padStart(2, '0')}` : '--:--'}
+                  </span>
+                </div>
+                {message.metadata.voiceInfo.transcription && (
+                  <div className="text-xs text-text-secondary pl-10 border-l-2 border-primary/20 ml-1">
+                    {message.metadata.voiceInfo.transcription}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -692,6 +991,8 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
   const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
   const [loadingSkills, setLoadingSkills] = useState(false);
   const [savingSkills, setSavingSkills] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
+  const [imChannelStatuses, setImChannelStatuses] = useState<IMChannelStatus[]>([]);
   const [trackedDispatches, setTrackedDispatches] = useState<Map<string, { employeeName: string }>>(new Map());
   const [waitingFeedbacks, setWaitingFeedbacks] = useState<Map<string, { employeeName: string; questionContent?: string }>>(new Map());
   const [replyingToProject, setReplyingToProject] = useState<string | null>(null);
@@ -1403,6 +1704,31 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
     textareaRef.current?.focus();
   };
 
+  // Optimize user input
+  const handleOptimize = async () => {
+    const content = inputValue.trim();
+    if (!content || optimizing) return;
+
+    setOptimizing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/secretary/optimize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      const result = await res.json();
+      if (result.success && result.optimized) {
+        setInputValue(result.optimized);
+        toast.success('已优化输入内容');
+      } else {
+        toast.error(result.error || '优化失败');
+      }
+    } catch (err) {
+      toast.error('优化请求失败');
+    }
+    setOptimizing(false);
+  };
+
   // Abort AI response
   const handleAbort = async () => {
     if (aborting) return;
@@ -1648,6 +1974,32 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
     fetchScheduled();
   }, []);
 
+  // Reload scheduled messages when panel opens
+  useEffect(() => {
+    if (showScheduledPanel) {
+      fetch(`${API_BASE}/api/chat/home/secretary/scheduled-messages`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.data) setScheduledMsgs(data.data);
+        })
+        .catch(() => {});
+    }
+  }, [showScheduledPanel]);
+
+  // Load IM channel statuses
+  useEffect(() => {
+    async function fetchIMStatus() {
+      try {
+        const res = await fetch(`${API_BASE}/api/im/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setImChannelStatuses(data);
+        }
+      } catch { /* ignore */ }
+    }
+    fetchIMStatus();
+  }, []);
+
   // Load skills
   useEffect(() => {
     async function fetchSkills() {
@@ -1680,9 +2032,10 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
     setSavingScheduled(false);
   };
 
-  const debouncedSave = () => {
+  const debouncedSave = (msgsOrEvent?: SecretaryScheduledMessage[] | React.FocusEvent) => {
     if (blurSaveTimer.current) clearTimeout(blurSaveTimer.current);
-    blurSaveTimer.current = setTimeout(() => handleSaveScheduled(scheduledMsgsRef.current), 300);
+    const msgs = Array.isArray(msgsOrEvent) ? msgsOrEvent : scheduledMsgsRef.current;
+    blurSaveTimer.current = setTimeout(() => handleSaveScheduled(msgs), 300);
   };
 
   const addScheduledMsg = () => {
@@ -1694,14 +2047,21 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
       aiReply: true,
       enabled: false,
     };
-    setScheduledMsgs([...scheduledMsgs, newMsg]);
+    const updated = [...scheduledMsgs, newMsg];
+    setScheduledMsgs(updated);
+    // Auto-save after adding new task
+    handleSaveScheduled(updated);
   };
 
   const updateScheduledMsg = (id: string, partial: Partial<SecretaryScheduledMessage>) => {
     setScheduledMsgs(prev => {
       const next = prev.map(m => m.id === id ? { ...m, ...partial } : m);
+      // Immediate save for checkbox/toggle changes, debounced for text/number inputs
       if (partial.enabled !== undefined || partial.aiReply !== undefined || partial.scheduleType !== undefined) {
         handleSaveScheduled(next);
+      } else {
+        // Trigger debounced save for intervalMinutes, scheduledTime, content
+        debouncedSave(next);
       }
       return next;
     });
@@ -1717,17 +2077,21 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
   const handleTriggerScheduledMsg = async (msgId: string) => {
     setTriggeringMsg(msgId);
     try {
-      await fetch(`${API_BASE}/api/chat/home/secretary/scheduled-messages`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scheduledMessages: scheduledMsgs }),
-      });
-      await fetch(`${API_BASE}/api/chat/home/secretary/scheduled-messages/trigger`, {
+      // Trigger execution (backend will update lastSentAt)
+      const res = await fetch(`${API_BASE}/api/chat/home/secretary/scheduled-messages/trigger`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messageId: msgId }),
       });
-      setScheduledMsgs(prev => prev.map(m => m.id === msgId ? { ...m, lastSentAt: Date.now() } : m));
+      const result = await res.json();
+      if (result.success) {
+        // Reload from server to get updated lastSentAt
+        const reloadRes = await fetch(`${API_BASE}/api/chat/home/secretary/scheduled-messages`);
+        if (reloadRes.ok) {
+          const data = await reloadRes.json();
+          if (data.data) setScheduledMsgs(data.data);
+        }
+      }
     } catch { /* ignore */ }
     setTriggeringMsg(null);
   };
@@ -1991,6 +2355,33 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
                           {triggeringMsg === sm.id ? '发送中...' : '立即执行'}
                         </button>
                       </div>
+
+                      {/* IM Send Settings */}
+                      <div className="mt-3 pt-3 border-t border-border-subtle/30 dark:border-white/[0.04] rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <Send className="w-3.5 h-3.5 text-text-secondary" />
+                          <span className="text-[11px] font-medium text-text-secondary/70">发送到 IM</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={sm.sendToIM}
+                              onChange={(e) => {
+                                updateScheduledMsg(sm.id, {
+                                  sendToIM: e.target.checked,
+                                  // Default to wechat_personal when enabled
+                                  imPlatform: e.target.checked ? (sm.imPlatform || 'wechat_personal') : undefined,
+                                });
+                              }}
+                              className="w-3.5 h-3.5 rounded accent-primary"
+                            />
+                            <span className="text-[11px] text-text-secondary/60">
+                              {sm.sendToIM ? '将自动发送给最近联系的用户' : '启用后自动发送'}
+                            </span>
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2095,9 +2486,14 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
                 <Settings className="w-5 h-5" />
               </button>
               <div className="h-4 w-px bg-border-subtle mx-1" />
-              <button type="button" className="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-text-secondary hover:text-text-main hover:bg-bg-subtle rounded-lg transition-colors">
-                <Sparkles className="w-4 h-4" />
-                <span>优化</span>
+              <button
+                type="button"
+                onClick={handleOptimize}
+                disabled={!inputValue.trim() || optimizing || sending || isStreaming}
+                className="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-text-secondary hover:text-text-main hover:bg-bg-subtle rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Sparkles className={`w-4 h-4 ${optimizing ? 'animate-pulse' : ''}`} />
+                <span>{optimizing ? '优化中...' : '优化'}</span>
               </button>
             </div>
             {isStreaming ? (

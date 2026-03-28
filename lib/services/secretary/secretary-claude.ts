@@ -20,6 +20,9 @@ import fsSync from 'fs';
 import { buildSoulPromptBlock } from '@/lib/services/secretary-soul';
 import { getClaudeCodeExecutablePath, getBuiltinNodeDir, USER_SKILLS_DIR_ABSOLUTE } from '@/lib/config/paths';
 import { CLAUDE_DEFAULT_MODEL, normalizeClaudeModelId } from '@/lib/constants/claudeModels';
+import { loadMemory } from '@/lib/services/secretary-memory';
+import { searchMemory, type RetrievalResult } from '@/lib/services/memory-retriever';
+import { buildMemoryPromptBlockFromResults } from '@/lib/services/secretary-memory-prompt';
 
 // ========== Constants ==========
 
@@ -116,9 +119,13 @@ async function loadAndApplyClaudeConfig(): Promise<string | undefined> {
 export async function buildSecretarySystemPrompt(
   enabledSkills: string[] = [],
   workDir: string = SECRETARY_WORK_DIR,
-  isIMMode: boolean = false
+  isIMMode: boolean = false,
+  message?: string
 ): Promise<string> {
   const parts: string[] = [];
+  
+  // Track API-registered skills to avoid duplicate Skill tool injection
+  let apiRegisteredSkillNames: Set<string> = new Set();
 
   // 1. Base identity
   parts.push(`你是秘书助手，请根据用户需求自动选择最佳执行方式。`);
@@ -133,45 +140,36 @@ export async function buildSecretarySystemPrompt(
     console.warn('[SecretaryClaude] Failed to load SOUL block:', err);
   }
 
-  // 3. Memory content
+  // 3. Memory content (BM25 retrieval-based)
   try {
-    const memoryPath = path.join(process.cwd(), 'data', 'secretary-memory.json');
-    if (fsSync.existsSync(memoryPath)) {
-      const memoryContent = await fs.readFile(memoryPath, 'utf-8');
-      const memory = JSON.parse(memoryContent);
-      
-      // Build memory summary
-      const memorySummary: string[] = [];
-      
-      if (memory.user_profile && Array.isArray(memory.user_profile) && memory.user_profile.length > 0) {
-        memorySummary.push('**用户画像**:');
-        memory.user_profile.slice(0, 10).forEach((item: any) => {
-          memorySummary.push(`- ${item.key}: ${item.value}`);
-        });
-      }
-      
-      if (memory.learned_preference && Array.isArray(memory.learned_preference) && memory.learned_preference.length > 0) {
-        memorySummary.push('\n**用户偏好**:');
-        memory.learned_preference.slice(0, 5).forEach((item: any) => {
-          memorySummary.push(`- ${item.key}: ${item.value}`);
-        });
-      }
-      
-      // Interaction patterns (user habits and activities)
-      if (memory.interaction_pattern && Array.isArray(memory.interaction_pattern) && memory.interaction_pattern.length > 0) {
-        memorySummary.push('\n**交互模式**:');
-        memory.interaction_pattern.slice(0, 8).forEach((item: any) => {
-          memorySummary.push(`- ${item.key}: ${item.value}`);
-        });
-      }
-      
-      if (memorySummary.length > 0) {
-        parts.push(
-          `\n========== 记忆 ==========\n` +
-          memorySummary.join('\n') +
-          `\n==========================`
-        );
-      }
+    const memory = await loadMemory();
+    let retrievalResults: RetrievalResult[] = [];
+    
+    // Check if this is an identity query - return all user_profile entries
+    const isIdentityQuery = message && /^(我是谁|你认识我吗|你知道我是谁|我的信息|我的资料|关于我)/.test(message.trim());
+    
+    if (isIdentityQuery) {
+      // Directly return all user_profile entries as high-score results
+      retrievalResults = (memory.user_profile || []).map(entry => ({
+        entry,
+        score: 1.0,
+        layer: 'long_term' as const,
+      }));
+      console.log(`[SecretaryClaude] Identity query detected, returning ${retrievalResults.length} user_profile entries`);
+    } else if (message && message.trim().length > 1) {
+      // Use BM25 retrieval for other queries
+      retrievalResults = searchMemory(message.trim(), memory, 10);
+      console.log(`[SecretaryClaude] BM25 retrieval: ${retrievalResults.length} results for query "${message.slice(0, 50)}"`);
+    }
+    
+    // Format retrieval results into prompt block
+    const memoryBlock = buildMemoryPromptBlockFromResults(retrievalResults);
+    if (memoryBlock) {
+      parts.push(
+        `\n========== 记忆 ==========\n` +
+        memoryBlock +
+        `\n==========================`
+      );
     }
   } catch (err) {
     console.warn('[SecretaryClaude] Failed to load memory:', err);
@@ -185,13 +183,50 @@ export async function buildSecretarySystemPrompt(
       const registry = JSON.parse(registryContent);
       
       if (registry.skills && Array.isArray(registry.skills) && registry.skills.length > 0) {
+        // 动态获取已部署技能的端口
+        let deployedSkillPorts: Record<string, number> = {};
+        try {
+          const pluginExPath = path.join(process.cwd(), 'data', 'user-skills', '.claude-plugin', 'plugin-ex.json');
+          if (fsSync.existsSync(pluginExPath)) {
+            const pluginExContent = await fs.readFile(pluginExPath, 'utf-8');
+            const pluginEx = JSON.parse(pluginExContent);
+            if (pluginEx.deployedSkills) {
+              for (const [name, meta] of Object.entries(pluginEx.deployedSkills)) {
+                const m = meta as any;
+                if (m.port && (m.status === 'deployed' || m.status === 'running')) {
+                  deployedSkillPorts[name] = m.port;
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[SecretaryClaude] Failed to read deployed skill ports:', err);
+        }
+        console.log(`[SecretaryClaude] API skill ports: ${JSON.stringify(deployedSkillPorts)}`);
+        
         const apiEndpoints: string[] = [];
         apiEndpoints.push('## 可用 API 接口\n');
         apiEndpoints.push('以下接口可通过 Bash 工具使用 curl 调用:\n');
         
         for (const skill of registry.skills) {
-          apiEndpoints.push(`### ${skill.displayName || skill.skillName}`);
+          const skillName = skill.skillName;
+          const skillPort = deployedSkillPorts[skillName];
+          
+          // Track API-registered skill names to avoid duplicate Skill tool injection
+          apiRegisteredSkillNames.add(skillName);
+          
+          if (!skillPort) {
+            // 技能未运行，跳过或标注
+            apiEndpoints.push(`### ${skill.displayName || skillName} (⚠️ 未运行)`);
+            apiEndpoints.push(`描述: ${skill.description || '无描述'}`);
+            apiEndpoints.push('**注意**: 该技能当前未运行，API 不可用\n');
+            continue;
+          }
+          
+          const baseUrl = `http://localhost:${skillPort}`;
+          apiEndpoints.push(`### ${skill.displayName || skillName}`);
           apiEndpoints.push(`描述: ${skill.description || '无描述'}`);
+          apiEndpoints.push(`服务地址: ${baseUrl}`);
           
           if (skill.endpoints && Array.isArray(skill.endpoints)) {
             for (const endpoint of skill.endpoints) {
@@ -199,22 +234,22 @@ export async function buildSecretarySystemPrompt(
                 `${p.name}${p.required ? '*' : ''}: ${p.type} - ${p.description || ''}`
               ).join(', ') || '无参数';
               
-              apiEndpoints.push(`- ${endpoint.method} ${endpoint.path}: ${endpoint.description || ''}`);
+              apiEndpoints.push(`- ${endpoint.method} ${baseUrl}${endpoint.path}: ${endpoint.description || ''}`);
               apiEndpoints.push(`  参数: ${params}`);
             }
           }
           apiEndpoints.push('');
         }
         
-        apiEndpoints.push('调用方法: 使用 Bash 工具执行 curl 命令，例如:');
-                
-        // Get the server port dynamically for API calls
-        const apiPort = process.env.PORT || '3000';
-                
-        apiEndpoints.push('```bash');
-        apiEndpoints.push(`curl -s -X GET "http://localhost:${apiPort}/api/todos"`);
-        apiEndpoints.push(`curl -s -X POST "http://localhost:${apiPort}/api/todos" -H "Content-Type: application/json" -d '{"title": "任务名称"}'`);
-        apiEndpoints.push('```\n');
+        // 生成示例（使用第一个可用技能的端口）
+        const firstAvailablePort = Object.values(deployedSkillPorts)[0];
+        if (firstAvailablePort) {
+          apiEndpoints.push('调用方法: 使用 Bash 工具执行 curl 命令，例如:');
+          apiEndpoints.push('```bash');
+          apiEndpoints.push(`curl -s -X GET "http://localhost:${firstAvailablePort}/api/todos"`);
+          apiEndpoints.push(`curl -s -X POST "http://localhost:${firstAvailablePort}/api/todos" -H "Content-Type: application/json" -d '{"title": "任务名称"}'`);
+          apiEndpoints.push('```\n');
+        }
         
         parts.push(apiEndpoints.join('\n'));
       }
@@ -232,6 +267,12 @@ export async function buildSecretarySystemPrompt(
     skillDescriptions.push('**重要：使用 Skill 工具调用技能，不要手动执行脚本！**\n');
 
     for (const skillName of enabledSkills) {
+      // Skip skills already registered in API registry (they use curl, not Skill tool)
+      if (apiRegisteredSkillNames.has(skillName)) {
+        console.log(`[SecretaryClaude] ⏭️ Skipping SKILL.md for ${skillName} (API registry skill)`);
+        continue;
+      }
+      
       // Priority: user-skills > builtin skills
       const userPath = path.join(userSkillsRoot, skillName, 'SKILL.md');
       const builtinPath = path.join(skillsRoot, skillName, 'SKILL.md');
@@ -334,7 +375,9 @@ export async function buildSecretarySystemPrompt(
   }
 
   // 7. Skill tool usage instructions (IMPORTANT)
-  if (enabledSkills.length > 0) {
+  // Filter out API-registered skills - they should use curl, not Skill tool
+  const skillToolOnlySkills = enabledSkills.filter(s => !apiRegisteredSkillNames.has(s));
+  if (skillToolOnlySkills.length > 0) {
     parts.push(`## 技能调用方法（重要）
 
 **必须使用 Skill 工具调用技能，禁止手动执行脚本！**
@@ -348,7 +391,7 @@ Skill 工具参数:
 }
 \`\`\`
 
-可用技能: ${enabledSkills.join(', ')}
+可用技能: ${skillToolOnlySkills.join(', ')}
 
 示例：
 - 天气查询：Skill("weather-query", "查询北京今天的天气")
@@ -369,10 +412,10 @@ Skill 工具参数:
 
 ## 执行原则
 
-1. **优先使用 Skill 工具** — 直接调用已安装的技能
-2. **其次匹配 API 接口** — 精确高效
+1. **匹配 API 接口** — 使用 curl 调用已部署的 REST API 服务
+2. **使用 Skill 工具** — 调用插件型技能（如百度搜索、天气查询）
 3. **识别 @员工名** — 派发给对应员工处理
-4. **最后使用通用工具链** — 灵活兜底
+4. **使用通用工具链** — 灵活兜底
 
 ## 安全限制
 
@@ -450,7 +493,28 @@ export async function executeSecretaryClaude(
     }
   }
 
-  console.log(`[SecretaryClaude] Starting | session=${sessionId || 'new'} | request=${requestId} | skills=${enabledSkills.length}`);
+  // Filter out API-registered skills from Skill plugin loading
+  // API skills (like productivity-hub) use curl, not Skill tool
+  let pluginSkills = [...enabledSkills];
+  try {
+    const registryPath = path.join(process.cwd(), 'data', 'api-skill-registry.json');
+    if (fsSync.existsSync(registryPath)) {
+      const registryContent = await fs.readFile(registryPath, 'utf-8');
+      const registry = JSON.parse(registryContent);
+      if (registry.skills && Array.isArray(registry.skills)) {
+        const apiSkillNames = new Set(registry.skills.map((s: any) => s.skillName));
+        pluginSkills = enabledSkills.filter(s => !apiSkillNames.has(s));
+        if (pluginSkills.length < enabledSkills.length) {
+          const filtered = enabledSkills.filter(s => apiSkillNames.has(s));
+          console.log(`[SecretaryClaude] Filtered API skills from plugins: ${filtered.join(', ')}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[SecretaryClaude] Failed to filter API skills:', err);
+  }
+
+  console.log(`[SecretaryClaude] Starting | session=${sessionId || 'new'} | request=${requestId} | skills=${enabledSkills.length} | pluginSkills=${pluginSkills.length}`);
 
   const configuredMaxTokens = Number(process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS);
   const maxOutputTokens = Number.isFinite(configuredMaxTokens) && configuredMaxTokens > 0
@@ -492,10 +556,10 @@ export async function executeSecretaryClaude(
     const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
 
     const plugins: { type: 'local'; path: string }[] = [];
-    if (enabledSkills.length > 0) {
+    if (pluginSkills.length > 0) {
       plugins.push({ type: 'local', path: USER_SKILLS_DIR_ABSOLUTE });
       console.log(`[SecretaryClaude] 🧩 Loading skill plugins from: ${USER_SKILLS_DIR_ABSOLUTE}`);
-      console.log(`[SecretaryClaude] 🧩 Enabled skills: ${enabledSkills.join(', ')}`);
+      console.log(`[SecretaryClaude] 🧩 Plugin skills (Skill tool): ${pluginSkills.join(', ')}`);
     }
 
     // Inject env vars from enabled skills
@@ -642,7 +706,7 @@ export async function executeSecretaryClaude(
         model: finalModel,
         resume: sessionId,
         permissionMode: 'bypassPermissions',
-        systemPrompt: await buildSecretarySystemPrompt(enabledSkills, workDir, isIMMode),
+        systemPrompt: await buildSecretarySystemPrompt(enabledSkills, workDir, isIMMode, message),
         maxOutputTokens,
         pathToClaudeCodeExecutable: getClaudeCodeExecutablePath(),
         env: envWithBuiltinNode,

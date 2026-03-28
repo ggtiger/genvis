@@ -6,13 +6,14 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import type { StreamAdapter } from '../../adapter';
-import type { IMChannelConfig, IMReplyRequest, IMStandardMessage } from '../../types';
+import type { IMChannelConfig, IMReplyRequest, IMStandardMessage, VoicePayload, ImagePayload, FilePayload } from '../../types';
 import { getUpdates, sendMessage } from './api';
 import {
   MessageType,
   MessageItemType,
   MessageState,
   DEFAULT_BASE_URL,
+  CDN_BASE_URL,
   type WeixinMessage,
   type SendMessageReq,
 } from './types';
@@ -223,6 +224,38 @@ class WechatPersonalStreamAdapter implements StreamAdapter {
   }
 
   /**
+   * Get list of recent sender IDs (users who have sent messages to the bot).
+   * Returns array of { senderId, hasContextToken } sorted by most recent.
+   */
+  getRecentSenders(): Array<{ senderId: string; hasContextToken: boolean }> {
+    const senders: Array<{ senderId: string; hasContextToken: boolean }> = [];
+    for (const [senderId] of this.contextTokenCache) {
+      senders.push({
+        senderId,
+        hasContextToken: this.contextTokenCache.has(senderId),
+      });
+    }
+    return senders;
+  }
+
+  /**
+   * Get the most recent sender ID (last user who sent a message).
+   * Returns null if no senders cached.
+   */
+  getLastSenderId(): string | null {
+    const senders = Array.from(this.contextTokenCache.keys());
+    return senders.length > 0 ? senders[senders.length - 1] : null;
+  }
+
+  /**
+   * Get the context_token for a specific sender.
+   * Returns null if no token cached for this sender.
+   */
+  getContextToken(senderId: string): string | null {
+    return this.contextTokenCache.get(senderId) || null;
+  }
+
+  /**
    * 发送回复消息
    */
   async sendReply(reply: IMReplyRequest, config: IMChannelConfig): Promise<void> {
@@ -276,15 +309,179 @@ class WechatPersonalStreamAdapter implements StreamAdapter {
     try {
       // 提取文本内容
       let content = '';
-      let messageType: 'text' | 'image' | 'unsupported' = 'unsupported';
+      let messageType: 'text' | 'image' | 'voice' | 'file' | 'unsupported' = 'unsupported';
+      let voicePayload: VoicePayload | undefined;
+      let imagePayload: ImagePayload | undefined;
+      let filePayload: FilePayload | undefined;
 
-      if (msg.item_list && msg.item_list.length > 0) {
+      // ========== 1. 优先检查顶层 type + voice_item（新格式语音消息） ==========
+      // 微信 ilink 语音消息可能直接在顶层包含 type=3 和 voice_item
+      if (msg.type === MessageItemType.VOICE && msg.voice_item) {
+        messageType = 'voice';
+        const vi = msg.voice_item;
+
+        // 使用微信自带的语音转文字
+        const transcriptionText = vi.text || '';
+
+        // 构建语音下载 URL
+        let voiceUrl = '';
+        if (vi.media?.encrypt_query_param && vi.media?.aes_key) {
+          voiceUrl = `${CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(vi.media.encrypt_query_param)}`;
+        } else if (vi.url) {
+          voiceUrl = vi.url.startsWith('http') ? vi.url : `${CDN_BASE_URL}/${vi.url}`;
+        }
+
+        voicePayload = {
+          voiceUrl,
+          format: vi.encode_type === 4 ? 'silk' : (vi.format || 'silk'),
+          duration: vi.playtime ? Math.round(vi.playtime / 1000) : (vi.length ? Math.round(vi.length / 1000) : undefined),
+          size: vi.size,
+          aesKey: vi.media?.aes_key,
+          sampleRate: vi.sample_rate,
+        };
+
+        // 使用转录文本作为内容，否则使用占位符
+        content = transcriptionText || '[语音消息]';
+        console.log(`[WechatPersonal] Voice (top-level): transcription="${transcriptionText}", duration=${voicePayload.duration}s, hasUrl=${!!voiceUrl}`);
+      }
+      // ========== 1.5 检查顶层 type + image_item（新格式图片消息） ==========
+      else if (msg.type === MessageItemType.IMAGE && msg.image_item) {
+        messageType = 'image';
+        const ii = msg.image_item;
+
+        // 构建图片下载 URL
+        let imageUrl = '';
+        if (ii.media?.encrypt_query_param && ii.media?.aes_key) {
+          imageUrl = `${CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(ii.media.encrypt_query_param)}`;
+        } else if (ii.url) {
+          imageUrl = ii.url.startsWith('http') ? ii.url : `${CDN_BASE_URL}/${ii.url}`;
+        }
+
+        imagePayload = {
+          imageUrl,
+          width: ii.width,
+          height: ii.height,
+          size: ii.size,
+          aesKey: ii.media?.aes_key,
+          format: 'jpg', // 默认 jpg
+        };
+
+        content = '[图片消息]';
+        console.log(`[WechatPersonal] Image (top-level): width=${ii.width}, height=${ii.height}, hasUrl=${!!imageUrl}`);
+      }
+      // ========== 1.6 检查顶层 type + file_item（新格式文件消息） ==========
+      else if (msg.type === MessageItemType.FILE && msg.file_item) {
+        messageType = 'file';
+        const fi = msg.file_item;
+
+        // 构建文件下载 URL
+        let fileUrl = '';
+        if (fi.media?.encrypt_query_param && fi.media?.aes_key) {
+          fileUrl = `${CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(fi.media.encrypt_query_param)}`;
+        } else if (fi.url) {
+          fileUrl = fi.url.startsWith('http') ? fi.url : `${CDN_BASE_URL}/${fi.url}`;
+        }
+
+        // 从文件名提取扩展名
+        const fileName = fi.file_name || 'unknown';
+        const ext = fileName.split('.').pop()?.toLowerCase() || '';
+
+        filePayload = {
+          fileUrl,
+          fileName,
+          size: fi.file_size,
+          fileType: ext,
+          aesKey: fi.media?.aes_key,
+        };
+
+        content = `[文件] ${fileName}`;
+        console.log(`[WechatPersonal] File (top-level): name=${fileName}, size=${fi.file_size}, hasUrl=${!!fileUrl}`);
+      }
+      // ========== 2. 处理 item_list（旧格式） ==========
+      else if (msg.item_list && msg.item_list.length > 0) {
         for (const item of msg.item_list) {
           if (item.type === MessageItemType.TEXT && item.text_item?.text) {
             content += item.text_item.text;
             messageType = 'text';
-          } else if (item.type === MessageItemType.IMAGE) {
+          } else if (item.type === MessageItemType.IMAGE && item.image_item) {
             messageType = 'image';
+            const ii = item.image_item;
+
+            // 构建图片下载 URL
+            let imageUrl = '';
+            if (ii.media?.encrypt_query_param && ii.media?.aes_key) {
+              imageUrl = `${CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(ii.media.encrypt_query_param)}`;
+            } else if (ii.url) {
+              imageUrl = ii.url.startsWith('http') ? ii.url : `${CDN_BASE_URL}/${ii.url}`;
+            }
+
+            imagePayload = {
+              imageUrl,
+              width: ii.width,
+              height: ii.height,
+              size: ii.size,
+              aesKey: ii.media?.aes_key,
+              format: 'jpg',
+            };
+
+            content = '[图片消息]';
+            console.log(`[WechatPersonal] Image (item_list): width=${ii.width}, height=${ii.height}, hasUrl=${!!imageUrl}`);
+          } else if (item.type === MessageItemType.VOICE && item.voice_item) {
+            messageType = 'voice';
+            const vi = item.voice_item;
+
+            // Use WeChat's built-in transcription if available
+            const transcriptionText = vi.text || '';
+
+            // Build voice URL for download (may fail, that's OK)
+            let voiceUrl = '';
+            if (vi.media?.encrypt_query_param && vi.media?.aes_key) {
+              voiceUrl = `${CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(vi.media.encrypt_query_param)}`;
+            } else if (vi.url) {
+              voiceUrl = vi.url.startsWith('http') ? vi.url : `${CDN_BASE_URL}/${vi.url}`;
+            }
+
+            voicePayload = {
+              voiceUrl,
+              format: vi.encode_type === 4 ? 'silk' : (vi.format || 'silk'),
+              duration: vi.playtime ? Math.round(vi.playtime / 1000) : (vi.length ? Math.round(vi.length / 1000) : undefined),
+              size: vi.size,
+              aesKey: vi.media?.aes_key,
+              sampleRate: vi.sample_rate,
+            };
+
+            // Use transcription text as content, fallback to placeholder
+            content = transcriptionText || '[语音消息]';
+            console.log(`[WechatPersonal] Voice (item_list): transcription="${transcriptionText}", duration=${voicePayload.duration}s, hasUrl=${!!voiceUrl}`);
+          } else if (item.type === MessageItemType.FILE && item.file_item) {
+            messageType = 'file';
+            const fi = item.file_item;
+
+            // 构建文件下载 URL
+            let fileUrl = '';
+            if (fi.media?.encrypt_query_param && fi.media?.aes_key) {
+              fileUrl = `${CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(fi.media.encrypt_query_param)}`;
+            } else if (fi.file_url) {
+              fileUrl = fi.file_url.startsWith('http') ? fi.file_url : `${CDN_BASE_URL}/${fi.file_url}`;
+            }
+
+            // 从文件名提取扩展名
+            const fileName = fi.file_name || 'unknown';
+            const ext = fileName.split('.').pop()?.toLowerCase() || '';
+
+            filePayload = {
+              fileUrl,
+              fileName,
+              size: fi.file_size,
+              fileType: ext,
+              aesKey: fi.media?.aes_key,
+            };
+
+            content = `[文件] ${fileName}`;
+            console.log(`[WechatPersonal] File (item_list): name=${fileName}, size=${fi.file_size}, hasUrl=${!!fileUrl}`);
+          } else if (item.type !== MessageItemType.TEXT && item.type !== MessageItemType.IMAGE && item.type !== MessageItemType.FILE) {
+            // 非文本/图片/语音消息，记录日志
+            console.log(`[WechatPersonal] Unsupported item type: ${item.type}`);
           }
         }
       }
@@ -302,6 +499,9 @@ class WechatPersonalStreamAdapter implements StreamAdapter {
         conversationId: msg.session_id || '',
         timestamp: msg.create_time_ms || Date.now(),
         rawPayload: msg,
+        voicePayload,
+        imagePayload,
+        filePayload,
       };
     } catch (err) {
       console.error('[WechatPersonal] 消息解析失败:', err);

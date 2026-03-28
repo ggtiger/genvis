@@ -1,0 +1,68 @@
+{
+  "skillName": "secretary-scheduler",
+  "displayName": "秘书定时任务",
+  "description": "管理秘书的定时消息任务，支持查看、创建、修改、删除定时任务。当用户提到定时任务、scheduled task、remind me时使用此工具。",
+  "baseUrl": "",
+  "useRelativeUrl": true,
+  "endpoints": [
+    {
+      "path": "/api/secretary/scheduled-messages",
+      "method": "GET",
+      "name": "list_scheduled_messages",
+      "description": "获取所有定时任务列表",
+      "parameters": []
+    },
+    {
+      "path": "/api/secretary/scheduled-messages",
+      "method": "POST",
+      "name": "create_scheduled_message",
+      "description": "创建新的定时任务",
+      "parameters": [
+        {"name": "content", "type": "string", "required": true, "description": "任务内容"},
+        {"name": "scheduleType", "type": "string", "required": false, "description": "类型: interval(间隔) 或 daily(每日固定时间)", "default": "interval"},
+        {"name": "intervalMinutes", "type": "number", "required": false, "description": "间隔分钟数(间隔模式)", "default": 60},
+        {"name": "scheduledTime", "type": "string", "required": false, "description": "执行时间HH:MM格式(每日模式)"},
+        {"name": "aiReply", "type": "boolean", "required": false, "description": "是否AI回复", "default": true},
+        {"name": "enabled", "type": "boolean", "required": false, "description": "是否启用", "default": false},
+        {"name": "sendToIM", "type": "boolean", "required": false, "description": "是否发送到IM", "default": false}
+      ]
+    },
+    {
+      "path": "/api/secretary/scheduled-messages/{id}",
+      "method": "PATCH",
+      "name": "update_scheduled_message",
+      "description": "更新定时任务",
+      "parameters": [
+        {"name": "id", "type": "string", "required": true, "in": "path", "description": "任务ID"},
+        {"name": "content", "type": "string", "required": false, "description": "任务内容"},
+        {"name": "scheduleType", "type": "string", "required": false, "description": "类型"},
+        {"name": "intervalMinutes", "type": "number", "required": false, "description": "间隔分钟数"},
+        {"name": "scheduledTime", "type": "string", "required": false, "description": "执行时间"},
+        {"name": "aiReply", "type": "boolean", "required": false, "description": "是否AI回复"},
+        {"name": "enabled", "type": "boolean", "required": false, "description": "是否启用"},
+        {"name": "sendToIM", "type": "boolean", "required": false, "description": "是否发送到IM"}
+      ]
+    },
+    {
+      "path": "/api/secretary/scheduled-messages/{id}",
+      "method": "DELETE",
+      "name": "delete_scheduled_message",
+      "description": "删除定时任务",
+      "parameters": [
+        {"name": "id", "type": "string", "required": true, "in": "path", "description": "任务ID"}
+      ]
+    },
+    {
+      "path": "/api/secretary/scheduled-messages/{id}/trigger",
+      "method": "POST",
+      "name": "trigger_scheduled_message",
+      "description": "立即执行定时任务",
+      "parameters": [
+        {"name": "id", "type": "string", "required": true, "in": "path", "description": "任务ID"}
+      ]
+    }
+  ],
+  "auth": {
+    "authType": "none"
+  }
+}
