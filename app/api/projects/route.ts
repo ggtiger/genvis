@@ -112,6 +112,25 @@ export async function POST(request: NextRequest) {
 
     const project = await createProject(input);
 
+    // Register dispatch tracking when employee_id is provided (secretary dispatch)
+    // so that CLI completion triggers notification back to secretary
+    if (employee_id) {
+      try {
+        const { getEmployeeById } = await import('@/lib/services/employee-service');
+        const { trackDispatch } = await import('@/lib/services/dispatch-tracker');
+        const emp = await getEmployeeById(employee_id);
+        trackDispatch({
+          projectId: input.project_id,
+          employeeName: emp?.name || '员工',
+          source: 'web',
+          createdAt: Date.now(),
+        });
+        console.log(`[API] Dispatch tracking registered for project: ${input.project_id} (employee: ${emp?.name || employee_id})`);
+      } catch (err) {
+        console.warn(`[API] Failed to register dispatch tracking:`, err);
+      }
+    }
+
     // Auto-start task if autoStart flag is set and initialPrompt exists
     if (autoStart && input.initialPrompt) {
       console.log(`[API] 🚀 Auto-starting task for project: ${input.project_id}`);
