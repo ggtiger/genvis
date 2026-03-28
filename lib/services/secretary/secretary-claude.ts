@@ -203,7 +203,25 @@ export async function buildSecretarySystemPrompt(
           console.warn('[SecretaryClaude] Failed to read deployed skill ports:', err);
         }
         console.log(`[SecretaryClaude] API skill ports: ${JSON.stringify(deployedSkillPorts)}`);
-        
+
+        // Build set of skills that use relative URLs (main service port, no independent port)
+        const relativeUrlSkills = new Set<string>();
+        for (const skillDir of [path.join(process.cwd(), 'skills'), path.join(process.cwd(), 'data', 'user-skills')]) {
+          try {
+            const entries = await fs.readdir(skillDir);
+            for (const entry of entries) {
+              try {
+                const epContent = await fs.readFile(path.join(skillDir, entry, 'api-endpoints.json'), 'utf-8');
+                const epData = JSON.parse(epContent);
+                if (epData.useRelativeUrl && epData.skillName) {
+                  relativeUrlSkills.add(epData.skillName);
+                }
+              } catch {}
+            }
+          } catch {}
+        }
+        console.log(`[SecretaryClaude] Relative URL skills: ${[...relativeUrlSkills].join(', ') || 'none'}`);
+
         const apiEndpoints: string[] = [];
         apiEndpoints.push('## 可用 API 接口\n');
         apiEndpoints.push('以下接口可通过 Bash 工具使用 curl 调用:\n');
@@ -215,15 +233,21 @@ export async function buildSecretarySystemPrompt(
           // Track API-registered skill names to avoid duplicate Skill tool injection
           apiRegisteredSkillNames.add(skillName);
           
-          if (!skillPort) {
-            // 技能未运行，跳过或标注
+          // Determine base URL: independent port, main service port (relativeUrl), or unavailable
+          let baseUrl: string | null = null;
+          if (skillPort) {
+            baseUrl = `http://localhost:${skillPort}`;
+          } else if (relativeUrlSkills.has(skillName)) {
+            baseUrl = `http://localhost:${process.env.PORT || '3000'}`;
+          }
+
+          if (!baseUrl) {
+            // 技能未运行且非主服务路由，跳过或标注
             apiEndpoints.push(`### ${skill.displayName || skillName} (⚠️ 未运行)`);
             apiEndpoints.push(`描述: ${skill.description || '无描述'}`);
             apiEndpoints.push('**注意**: 该技能当前未运行，API 不可用\n');
             continue;
           }
-          
-          const baseUrl = `http://localhost:${skillPort}`;
           apiEndpoints.push(`### ${skill.displayName || skillName}`);
           apiEndpoints.push(`描述: ${skill.description || '无描述'}`);
           apiEndpoints.push(`服务地址: ${baseUrl}`);
@@ -242,7 +266,7 @@ export async function buildSecretarySystemPrompt(
         }
         
         // 生成示例（使用第一个可用技能的端口）
-        const firstAvailablePort = Object.values(deployedSkillPorts)[0];
+        const firstAvailablePort = Object.values(deployedSkillPorts)[0] || Number(process.env.PORT || '3000');
         if (firstAvailablePort) {
           apiEndpoints.push('调用方法: 使用 Bash 工具执行 curl 命令，例如:');
           apiEndpoints.push('```bash');
@@ -360,11 +384,11 @@ export async function buildSecretarySystemPrompt(
           employeeList.push(`  触发: @${emp.name}`);
         }
           
-        employeeList.push('\n**派发方法**:');
+        employeeList.push('\n**派发方法**: 使用 POST /api/projects 接口创建项目并自动启动');
         employeeList.push('```bash');
-        employeeList.push(`curl -s -X POST "http://localhost:${serverPort}/api/employees/{employeeId}/dispatch" \\`);
+        employeeList.push(`curl -s -X POST "http://localhost:${serverPort}/api/projects" \\`);
         employeeList.push('  -H "Content-Type: application/json" \\');
-        employeeList.push('  -d \'{"instruction": "具体任务指令"}\'' );
+        employeeList.push(`  -d '{"project_id":"p-xxx","name":"任务名称","initialPrompt":"具体任务指令","employee_id":"员工ID","mode":"code","autoStart":true}'`);
         employeeList.push('```\n');
           
         parts.push(employeeList.join('\n'));
