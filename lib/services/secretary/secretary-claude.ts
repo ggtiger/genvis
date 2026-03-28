@@ -418,6 +418,8 @@ Skill 工具参数:
 
 可用技能: ${skillToolOnlySkills.join(', ')}
 
+**安全规则：只允许调用以上列出的技能！调用未列出的技能将被系统拦截。**
+
 示例：
 - 天气查询：Skill("weather-query", "查询北京今天的天气")
 - 搜索：Skill("baidu-search", "搜索关于人工智能的最新资讯")
@@ -581,15 +583,27 @@ export async function executeSecretaryClaude(
       envWithBuiltinNode.PATH = `${builtinNodeDir}:${process.env.PATH || ''}`;
     }
 
-    // ========== Skill Plugin Loading ==========
+    // ========== Skill Plugin Loading (only enabled skills) ==========
     const skillsRoot = path.join(process.cwd(), 'skills');
     const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
 
     const plugins: { type: 'local'; path: string }[] = [];
     if (pluginSkills.length > 0) {
-      plugins.push({ type: 'local', path: USER_SKILLS_DIR_ABSOLUTE });
-      console.log(`[SecretaryClaude] 🧩 Loading skill plugins from: ${USER_SKILLS_DIR_ABSOLUTE}`);
-      console.log(`[SecretaryClaude] 🧩 Plugin skills (Skill tool): ${pluginSkills.join(', ')}`);
+      // Load individual skill directories instead of the entire user-skills root
+      for (const skillName of pluginSkills) {
+        const userSkillDir = path.join(userSkillsRoot, skillName);
+        const builtinSkillDir = path.join(skillsRoot, skillName);
+        // Prefer user-skills version, fallback to builtin
+        const skillDir = fsSync.existsSync(userSkillDir) ? userSkillDir
+          : fsSync.existsSync(builtinSkillDir) ? builtinSkillDir : null;
+        if (skillDir) {
+          plugins.push({ type: 'local', path: skillDir });
+          console.log(`[SecretaryClaude] 🧩 Loaded skill plugin: ${skillName} -> ${skillDir}`);
+        } else {
+          console.warn(`[SecretaryClaude] ⚠️ Skill directory not found: ${skillName}`);
+        }
+      }
+      console.log(`[SecretaryClaude] 🧩 Total plugin skills loaded: ${plugins.length}/${pluginSkills.length}`);
     }
 
     // Inject env vars from enabled skills
@@ -713,6 +727,19 @@ export async function executeSecretaryClaude(
         if (input.hook_event_name !== 'PreToolUse') return {};
         const toolName = input.tool_name || 'unknown';
         const toolInput = input.tool_input || {};
+
+        // === Enforce enabled-skills-only for Skill tool ===
+        if (toolName === 'Skill' && enabledSkills.length > 0) {
+          const requestedSkill = toolInput.skill || toolInput.name || '';
+          if (requestedSkill && !enabledSkills.includes(requestedSkill)) {
+            console.warn(`[SecretaryClaude] 🚫 Blocked disabled skill: "${requestedSkill}" | enabled: [${enabledSkills.join(', ')}]`);
+            return {
+              decision: 'block',
+              reason: `技能 "${requestedSkill}" 未启用。当前可用技能: ${enabledSkills.join(', ')}。请在秘书设置中启用该技能。`,
+            };
+          }
+        }
+
         const action = inferActionFromToolName(toolName);
         const filePath = extractPathFromInput(toolInput);
 

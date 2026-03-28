@@ -198,11 +198,11 @@ export default function EmployeeFormModal({
 
       {/* Panel */}
       <div
-        className="relative w-full max-w-2xl max-h-[85vh] flex flex-col glass rounded-2xl overflow-hidden shadow-2xl"
+        className="relative w-full max-w-2xl max-h-[85vh] flex flex-col bg-white/85 dark:bg-slate-800/85 backdrop-blur-2xl rounded-2xl overflow-hidden shadow-2xl border border-white/30 dark:border-slate-700/40"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/15 dark:border-white/[0.06] shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-700/60 shrink-0">
           <h2 className="text-lg font-bold text-slate-800 dark:text-white">
             {isEditing ? '编辑数字员工' : '新建数字员工'}
           </h2>
@@ -275,7 +275,7 @@ export default function EmployeeFormModal({
                 onChange={(e) => setName(e.target.value)}
                 placeholder="例如：Python 程序员"
                 disabled={isBuiltin}
-                className={`flex-1 px-4 py-2.5 rounded-xl bg-white/20 dark:bg-white/5 border border-white/20 dark:border-white/10 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:border-primary/50 focus:bg-white/30 dark:focus:bg-white/10 transition-all ${isBuiltin ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`flex-1 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all ${isBuiltin ? 'opacity-50 cursor-not-allowed' : ''}`}
                 maxLength={50}
               />
             </div>
@@ -287,7 +287,7 @@ export default function EmployeeFormModal({
                 value={category}
                 onChange={(e) => setCategory(e.target.value as EmployeeCategoryKey)}
                 disabled={isBuiltin}
-                className={`flex-1 px-4 py-2.5 rounded-xl bg-white/20 dark:bg-white/5 border border-white/20 dark:border-white/10 text-slate-800 dark:text-slate-200 text-sm focus:outline-none focus:border-primary/50 transition-all ${isBuiltin ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`flex-1 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-200 text-sm focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all ${isBuiltin ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {DEFAULT_EMPLOYEE_CATEGORIES.map((cat) => (
                   <option key={cat.key} value={cat.key}>{cat.name}</option>
@@ -363,7 +363,7 @@ export default function EmployeeFormModal({
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   placeholder="输入系统提示词..."
-                  className="w-full min-h-[300px] px-4 py-3 rounded-xl bg-white/20 dark:bg-white/5 border border-white/20 dark:border-white/10 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 text-sm font-mono focus:outline-none focus:border-primary/50 focus:bg-white/30 dark:focus:bg-white/10 transition-all"
+                  className="w-full min-h-[300px] px-4 py-3 rounded-xl bg-white dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 text-sm font-mono focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                   style={{ resize: 'vertical' }}
                 />
               </div>
@@ -378,7 +378,7 @@ export default function EmployeeFormModal({
                     value={systemPromptPlan}
                     onChange={(e) => setSystemPromptPlan(e.target.value)}
                     placeholder="输入规划阶段的系统提示词..."
-                    className="w-full min-h-[200px] px-4 py-3 rounded-xl bg-white/20 dark:bg-white/5 border border-white/20 dark:border-white/10 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 text-sm font-mono focus:outline-none focus:border-primary/50 focus:bg-white/30 dark:focus:bg-white/10 transition-all"
+                    className="w-full min-h-[200px] px-4 py-3 rounded-xl bg-white dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 text-sm font-mono focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                     style={{ resize: 'vertical' }}
                   />
                 </div>
@@ -390,7 +390,7 @@ export default function EmployeeFormModal({
                     value={systemPromptExecution}
                     onChange={(e) => setSystemPromptExecution(e.target.value)}
                     placeholder="输入执行阶段的系统提示词..."
-                    className="w-full min-h-[200px] px-4 py-3 rounded-xl bg-white/20 dark:bg-white/5 border border-white/20 dark:border-white/10 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 text-sm font-mono focus:outline-none focus:border-primary/50 focus:bg-white/30 dark:focus:bg-white/10 transition-all"
+                    className="w-full min-h-[200px] px-4 py-3 rounded-xl bg-white dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 text-sm font-mono focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                     style={{ resize: 'vertical' }}
                   />
                 </div>
@@ -400,7 +400,7 @@ export default function EmployeeFormModal({
         </form>
 
         {/* Footer */}
-        <div className="flex justify-between items-center gap-3 px-6 py-4 border-t border-white/15 dark:border-white/[0.06] shrink-0">
+        <div className="flex justify-between items-center gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-white/30 dark:bg-slate-700/40 shrink-0">
           <div>
             {isEditing && !isBuiltin && !showDeleteConfirm && (
               <button type="button" onClick={() => setShowDeleteConfirm(true)} disabled={loading}
