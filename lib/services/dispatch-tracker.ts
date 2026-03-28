@@ -12,6 +12,7 @@
 
 import { type SecretaryAttachment, type MessageSource } from './secretary-session';
 import { createSecretaryMessage } from './secretary/secretary-message-service';
+import { timelineLogger } from '@/lib/services/timeline';
 import type { SecretaryStreamManager } from './secretary-stream';
 
 /** 动态获取 secretaryStream 单例，避免 HMR 导致引用过期 */
@@ -374,6 +375,13 @@ async function handleCompletedTask(projectId: string, tracked: TrackedDispatch):
   } catch { /* ignore */ }
 
   console.log(`[DispatchTracker] ✅ handleCompletedTask 完成: ${projectId} (${tracked.employeeName})`);
+
+  timelineLogger.logSystem('secretary', `Task completed: ${tracked.employeeName}`, 'info', undefined, {
+    source: tracked.source,
+    hasResult: !!resultText,
+    projectId,
+    employeeName: tracked.employeeName,
+  }).catch(() => {});
 }
 /**
  * 轮询所有追踪中的 dispatch 任务状态

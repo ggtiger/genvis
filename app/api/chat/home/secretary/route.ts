@@ -61,6 +61,7 @@ import { recordCorrection } from '@/lib/services/correction-recorder';
 import { checkAndPromoteRules } from '@/lib/services/rule-promoter';
 import { searchDispatchLearnings } from '@/lib/services/correction-retriever';
 import { loadIntentExamples, formatIntentExamplesBlock } from '@/lib/services/intent-example-store';
+import { timelineLogger } from '@/lib/services/timeline';
 import type { Employee } from '@/types/backend/employee';
 
 // ========== Helpers ==========
@@ -188,6 +189,8 @@ export async function POST(request: NextRequest) {
     // Single session mode: one session per homepage secretary
     const session = await loadSession();
     console.log(`[Secretary] 📂 会话加载完成, id=${session.id}, 历史消息数=${session.messages.length}`);
+
+    timelineLogger.logSystem('secretary', `New request received`, 'info', undefined, { messageLength: message.trim().length, hasImages: !!images?.length, historyCount: session.messages.length }).catch(() => {});
 
     // Persist images to disk early so we have file refs + URLs for all paths
     let persistedImageFiles: DispatchImageFile[] = [];
@@ -320,11 +323,15 @@ export async function POST(request: NextRequest) {
     const classification = await classifyIntent(trimmedMsg, summaryText || undefined, intentExamples, claudeConfig);
     console.log(`[Secretary] 🏷️ Step1 意图分类: intent=${classification.intent}, target=${classification.target || 'N/A'}`);
 
+    timelineLogger.logSystem('secretary', `Intent classification: ${classification.intent}${classification.target ? ` -> ${classification.target}` : ''}`, 'info', undefined, { intent: classification.intent, target: classification.target, fastPath: false }).catch(() => {});
+
     // ========== Fast-path: dispatch 且 target 已知 → 跳过 Step 2，直接执行 ==========
     if (classification.intent === 'dispatch' && classification.target) {
       const resolvedId = resolveEmployeeId(classification.target, await getAllEmployees());
       if (resolvedId) {
         console.log(`[Secretary] ⚡ Fast-path dispatch: target="${classification.target}" → employeeId=${resolvedId}, 跳过 Step2`);
+
+        timelineLogger.logSystem('secretary', `Fast-path dispatch: ${classification.target} -> ${resolvedId}`, 'info', undefined, { intent: 'dispatch', target: classification.target, employeeId: resolvedId }).catch(() => {});
         const fastDecision: import('@/lib/services/secretary-core').AIDecision = {
           action: 'dispatch',
           employeeId: resolvedId,
@@ -738,6 +745,14 @@ export async function POST(request: NextRequest) {
     console.log(`[Secretary] 💬 回复: "${reply.slice(0, 100)}"`);
     console.log(`[Secretary] 📌 actions 数量: ${actions.length}`);
     console.log(`========== [Secretary] ========== 请求结束 ==========\n`);
+
+    timelineLogger.logSystem('secretary', `Request completed: ${decision.action}`, 'info', undefined, {
+      action: decision.action,
+      durationMs: Date.now() - _secretaryStartTime,
+      replyLength: reply.length,
+      actionsCount: actions.length,
+      confidence,
+    }).catch(() => {});
 
     return createSuccessResponse(responseData);
   } catch (error) {

@@ -23,6 +23,7 @@ import { formatSkillResult } from '@/lib/services/secretary-result-formatter';
 import { getAllSkills } from '@/lib/services/skill-service';
 import { buildSoulPromptBlock } from '@/lib/services/secretary-soul';
 import type { SecretaryAction } from '@/lib/services/secretary-session';
+import { timelineLogger } from '@/lib/services/timeline';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -375,7 +376,8 @@ export async function callClaudeAPI(
     if (!error) error = err instanceof Error ? err.message : String(err);
     throw err;
   } finally {
-    // Fire-and-forget log
+    const durationMs = Date.now() - startTime;
+    // Fire-and-forget structured log
     appendClaudeLog({
       timestamp: new Date().toISOString(),
       model: config.model,
@@ -384,7 +386,17 @@ export async function callClaudeAPI(
       lastUserMessage: lastUserText,
       responseLength: responseText.length,
       responseText: responseText.slice(0, 2000),
-      durationMs: Date.now() - startTime,
+      durationMs,
+      ...(error ? { error } : {}),
+    }).catch(() => {});
+
+    // Secretary logger
+    timelineLogger.logSDK('secretary', error ? `AI call failed: ${error.slice(0, 200)}` : `AI call completed (${responseText.length} chars)`, error ? 'error' : 'info', undefined, {
+      messagesCount: messages.length,
+      lastUserMessage: lastUserText?.slice(0, 200),
+      responseLength: responseText.length,
+      model: config.model,
+      durationMs,
       ...(error ? { error } : {}),
     }).catch(() => {});
   }
@@ -512,6 +524,7 @@ export async function executeDispatch(
 ): Promise<SecretaryActionResult> {
   const { employeeId, instruction } = decision;
   console.log(`[SecretaryCore] 🚀 executeDispatch: employeeId=${employeeId}, instruction="${instruction?.slice(0, 100)}", 有图片=${!!imageFiles}, classificationTarget=${classificationTarget || 'N/A'}`);
+  const _dispatchStart = Date.now();
 
   if (!employeeId || !instruction) {
     return {
@@ -547,6 +560,12 @@ export async function executeDispatch(
   const result = await dispatchToEmployee(employeeId, finalInstruction, imageFiles);
 
   if (result.success) {
+    timelineLogger.logSystem('secretary', `Dispatched to ${result.employeeName}`, 'info', undefined, {
+      employeeId: result.employeeId,
+      employeeName: result.employeeName,
+      projectId: result.projectId!,
+      durationMs: Date.now() - _dispatchStart,
+    }).catch(() => {});
     return {
       reply: `已将任务分配给 ${result.employeeName}，正在执行中⏳ 完成后会自动通知你结果。`,
       actions: [
@@ -559,6 +578,10 @@ export async function executeDispatch(
       ],
     };
   } else {
+    timelineLogger.logError('secretary', `Dispatch failed: ${result.error}`, undefined, {
+      employeeId,
+      instruction: instruction?.slice(0, 200),
+    }).catch(() => {});
     return {
       reply: `调度失败：${result.error}`,
       actions: [],
@@ -603,6 +626,7 @@ export async function executeSkillCall(
   classificationTarget?: string,
 ): Promise<SecretaryActionResult> {
   const { skillName, method, path: apiPath, body, queryParams } = decision;
+  const _skillStart = Date.now();
 
   // Use classificationTarget (from intent classification) as the actual skillName
   // This is more stable than AI-generated skillName which may be displayName
@@ -659,6 +683,12 @@ export async function executeSkillCall(
 
   if (result.success) {
     const reply = formatSkillResult(method, result.data);
+    timelineLogger.logAPI('secretary', `Skill call success: ${actualSkillName} ${method} ${apiPath}`, 'info', undefined, {
+      skillName: actualSkillName,
+      durationMs: Date.now() - _skillStart,
+      method,
+      apiPath,
+    }).catch(() => {});
     return {
       reply,
       actions: [
@@ -671,6 +701,11 @@ export async function executeSkillCall(
       ],
     };
   } else {
+    timelineLogger.logError('secretary', `Skill call failed: ${actualSkillName} ${method} ${apiPath} - ${result.error}`, undefined, {
+      skillName: actualSkillName,
+      method,
+      apiPath,
+    }).catch(() => {});
     return {
       reply: `技能调用失败：${result.error}`,
       actions: [

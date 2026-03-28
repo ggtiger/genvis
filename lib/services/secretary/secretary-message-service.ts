@@ -46,6 +46,18 @@ export interface SecretaryMessage {
     result?: unknown;
     confidence?: number;
   }>;
+  conversationStats?: {
+    duration_ms?: number;
+    duration_api_ms?: number;
+    total_cost_usd?: number;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheReadInputTokens?: number;
+      cacheCreationInputTokens?: number;
+    };
+    num_turns?: number;
+  };
   images?: string[];
   attachments?: Array<{
     name: string;
@@ -76,6 +88,7 @@ function mapRow(row: typeof secretaryMessages.$inferSelect): SecretaryMessage {
 
   // Extract common fields from metadata to top level for frontend compatibility
   const actions = metadata?.actions as SecretaryMessage['actions'];
+  const conversationStats = metadata?.conversationStats as SecretaryMessage['conversationStats'];
   const images = metadata?.images as SecretaryMessage['images'];
   const attachments = metadata?.attachments as SecretaryMessage['attachments'];
 
@@ -91,6 +104,7 @@ function mapRow(row: typeof secretaryMessages.$inferSelect): SecretaryMessage {
     requestId: row.requestId || undefined,
     createdAt: row.createdAt,
     ...(actions ? { actions } : {}),
+    ...(conversationStats ? { conversationStats } : {}),
     ...(images ? { images } : {}),
     ...(attachments ? { attachments } : {}),
   };

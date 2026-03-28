@@ -31,6 +31,8 @@ import {
   User,
   FileText as FileTextIcon,
   Send,
+  ScrollText,
+  Filter,
 } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import type { Employee } from '@/types/backend/employee';
@@ -202,6 +204,13 @@ interface SecretaryMessage {
     employeeName: string;
     projectId: string;
   }>;
+  conversationStats?: {
+    duration_ms?: number;
+    duration_api_ms?: number;
+    total_cost_usd?: number;
+    usage?: { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number };
+    num_turns?: number;
+  };
 }
 
 interface SecretaryScheduledMessage {
@@ -460,6 +469,51 @@ function ToolResultBlock({ icon: Icon, label, color, bgClass, borderClass, toolN
   );
 }
 
+// ========== Conversation Stats Display ==========
+
+function ConversationStatsDisplay({ stats }: { stats: {
+  duration_ms?: number;
+  duration_api_ms?: number;
+  total_cost_usd?: number;
+  usage?: { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number };
+  num_turns?: number;
+} }) {
+  return (
+    <div className="text-[10px] text-slate-400 dark:text-slate-500 flex flex-wrap items-center gap-x-1 mt-1">
+      {stats.duration_ms !== undefined && (
+        <>
+          <span>{(stats.duration_ms / 1000).toFixed(1)}s</span>
+          {stats.duration_api_ms !== undefined && (
+            <span className="text-slate-300 dark:text-slate-600">(API {(stats.duration_api_ms / 1000).toFixed(1)}s)</span>
+          )}
+        </>
+      )}
+      {stats.total_cost_usd !== undefined && (
+        <>
+          <span className="text-slate-300 dark:text-slate-600">/</span>
+          <span>${stats.total_cost_usd.toFixed(4)}</span>
+        </>
+      )}
+      {stats.usage && (
+        <>
+          <span className="text-slate-300 dark:text-slate-600">/</span>
+          <span>{((stats.usage.inputTokens || 0) / 1000).toFixed(1)}K in</span>
+          <span>{((stats.usage.outputTokens || 0) / 1000).toFixed(1)}K out</span>
+          {stats.usage.cacheReadInputTokens && stats.usage.cacheReadInputTokens > 0 && (
+            <span className="text-slate-300 dark:text-slate-600">({(stats.usage.cacheReadInputTokens / 1000).toFixed(1)}K cached)</span>
+          )}
+        </>
+      )}
+      {stats.num_turns !== undefined && (
+        <>
+          <span className="text-slate-300 dark:text-slate-600">/</span>
+          <span>{stats.num_turns} turns</span>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ========== Message Bubble ==========
 
 function SecretaryMessageBubble({ message, isStreaming }: { message: SecretaryMessage; isStreaming?: boolean }) {
@@ -635,6 +689,12 @@ function SecretaryMessageBubble({ message, isStreaming }: { message: SecretaryMe
             <div className="ml-4 pl-3 border-l-2 border-purple-200 dark:border-purple-500/30 space-y-0.5">
               {pendingTools?.map((t, i) => renderToolItem(t, 'pending', i))}
               {completedTools?.map((t, i) => renderToolItem(t, 'completed', i))}
+            </div>
+          )}
+          {/* Show conversation stats inside tool summary */}
+          {isCompleted && message.conversationStats && (
+            <div className="mt-1 ml-2">
+              <ConversationStatsDisplay stats={message.conversationStats} />
             </div>
           )}
         </div>
@@ -898,6 +958,10 @@ function SecretaryMessageBubble({ message, isStreaming }: { message: SecretaryMe
             )}
           </div>
         )}
+        {/* Conversation stats for AI messages */}
+        {isAI && !isToolUse && !isToolResult && !isSkillResult && message.conversationStats && (
+          <ConversationStatsDisplay stats={message.conversationStats} />
+        )}
       </div>
     </div>
   );
@@ -997,10 +1061,22 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
   const [waitingFeedbacks, setWaitingFeedbacks] = useState<Map<string, { employeeName: string; questionContent?: string }>>(new Map());
   const [replyingToProject, setReplyingToProject] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState<string>('');
+  const [conversationStats, setConversationStats] = useState<{
+    duration_ms?: number;
+    duration_api_ms?: number;
+    total_cost_usd?: number;
+    usage?: { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number };
+    num_turns?: number;
+  } | null>(null);
 
   // New states for enhanced UI
   const [isComposing, setIsComposing] = useState(false);
   const [showScheduledPanel, setShowScheduledPanel] = useState(false);
+  const [showLogsPanel, setShowLogsPanel] = useState(false);
+  const [logsContent, setLogsContent] = useState('');
+  const [isLogsSseConnected, setIsLogsSseConnected] = useState(false);
+  const consoleEndRef = useRef<HTMLDivElement>(null);
+  const logsEventSourceRef = useRef<EventSource | null>(null);
   const toast = useToast();
 
   // Attachment state
@@ -1065,6 +1141,83 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showScheduledPanel]);
+
+  // Secretary logs SSE connection - real-time timeline streaming
+  useEffect(() => {
+    if (!showLogsPanel) return;
+    if (typeof window === 'undefined') return;
+    if (!('EventSource' in window)) return;
+
+    let eventSource: EventSource | null = null;
+    let disposed = false;
+
+    const connectStream = () => {
+      if (disposed) return;
+
+      try {
+        const streamUrl = `${API_BASE}/api/secretary/logs`;
+        eventSource = new EventSource(streamUrl);
+        logsEventSourceRef.current = eventSource;
+
+        eventSource.onopen = () => {
+          setIsLogsSseConnected(true);
+        };
+
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+
+            switch (data.type) {
+              case 'connected':
+                setIsLogsSseConnected(true);
+                break;
+
+              case 'content':
+                // Initial full content
+                if (data.isInitial) {
+                  setLogsContent(data.data || '');
+                }
+                break;
+
+              case 'update':
+                // Incremental content - prepend (newest first)
+                setLogsContent((prev) => (data.data || '') + prev);
+                break;
+
+              case 'heartbeat':
+                // Keep-alive, no action needed
+                break;
+            }
+          } catch { /* ignore parse errors */ }
+        };
+
+        eventSource.onerror = () => {
+          setIsLogsSseConnected(false);
+          eventSource?.close();
+
+          // Reconnect after delay
+          if (!disposed) {
+            setTimeout(() => {
+              if (!disposed) connectStream();
+            }, 3000);
+          }
+        };
+      } catch (err) {
+        console.error('[SecretaryPanel] SSE connection failed:', err);
+      }
+    };
+
+    connectStream();
+
+    return () => {
+      disposed = true;
+      setIsLogsSseConnected(false);
+      if (logsEventSourceRef.current) {
+        logsEventSourceRef.current.close();
+        logsEventSourceRef.current = null;
+      }
+    };
+  }, [showLogsPanel]);
 
   // Load employees for @mention
   useEffect(() => {
@@ -1271,7 +1424,21 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
         }
 
         // AI streaming start - clear old tool summary for new request
+        if (data.type === 'conversation_stats') {
+          const stats = data.data || null;
+          setConversationStats(stats);
+          // Also inject stats into tool summary message for display in executing area
+          if (stats) {
+            setMessages((prev) => prev.map((m) =>
+              m.id === TOOL_SUMMARY_ID
+                ? { ...m, conversationStats: stats }
+                : m
+            ));
+          }
+        }
+
         if (data.type === 'ai_stream_start') {
+          setConversationStats(null);
           setCurrentRequestId(data.data?.requestId || null);
           // Clear old tool summary for new request
           setMessages((prev) => prev.filter((m) => m.id !== TOOL_SUMMARY_ID));
@@ -1308,26 +1475,36 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
           const refreshWithRetry = async (attempt = 0) => {
             const prevMsgs = messages;
             await loadMessages();
-            
+
             // Check if we got a new assistant message after this request
             // If persist was marked as failed, don't retry
             if (!persistSuccess) {
               console.log('[SecretaryPanel] Persist failed on server, skipping retry');
               return;
             }
-            
-            // Get current messages after load
+
+            // Check current messages for new AI reply with embedded stats
             setMessages(currentMsgs => {
-              // Check if we got new AI message (compare with prevMsgs length or last msg)
-              const hasNewAIMsg = currentMsgs.length > prevMsgs.length || 
+              const hasNewAIMsg = currentMsgs.length > prevMsgs.length ||
                 (currentMsgs.length > 0 && currentMsgs[currentMsgs.length - 1].role === 'assistant');
-              
-              // If no new AI message and this is first attempt, retry after delay
+
               if (!hasNewAIMsg && attempt < 2) {
                 setTimeout(() => refreshWithRetry(attempt + 1), 1500);
               }
-              return currentMsgs; // Return unchanged
+              return currentMsgs;
             });
+
+            // Use setTimeout to check after state update
+            setTimeout(() => {
+              setMessages(currentMsgs => {
+                const lastMsg = currentMsgs[currentMsgs.length - 1];
+                if (lastMsg?.role === 'assistant' && lastMsg?.conversationStats) {
+                  // DB message has stats embedded, clear real-time one to avoid duplicate
+                  setConversationStats(null);
+                }
+                return currentMsgs;
+              });
+            }, 50);
           };
           
           // Initial delay increased to 1500ms to give DB more time
@@ -2479,6 +2656,14 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
               </button>
               <button
                 type="button"
+                onClick={() => setShowLogsPanel(!showLogsPanel)}
+                className={`p-2 rounded-lg transition-colors ${showLogsPanel ? 'text-primary bg-primary/10' : 'text-text-secondary hover:text-primary hover:bg-bg-subtle'}`}
+                title="Execution logs"
+              >
+                <ScrollText className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowSettings(!showSettings)}
                 className={`p-2 rounded-lg transition-colors ${showSettings ? 'text-primary bg-primary/10' : 'text-text-secondary hover:text-primary hover:bg-bg-subtle'}`}
                 title="设置"
@@ -2599,6 +2784,66 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
                   清空对话记录
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Console Logs Panel */}
+      {showLogsPanel && (
+        <div className="absolute inset-0 z-40 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setShowLogsPanel(false)}>
+          <div className="bg-white/70 dark:bg-white/[0.06] backdrop-blur-xl rounded-2xl shadow-2xl border border-white/30 dark:border-white/[0.08] w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Console Header */}
+            <div className="flex items-center justify-between px-4 py-2 bg-white/30 dark:bg-white/[0.06] border-b border-white/20 dark:border-white/[0.06]">
+              <div className="flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="text-green-600 dark:text-green-400" strokeWidth="2">
+                  <polyline points="4 17 10 11 4 5"></polyline>
+                  <line x1="12" y1="19" x2="20" y2="19"></line>
+                </svg>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Secretary Console</span>
+                {/* Real-time connection indicator */}
+                <div className="flex items-center gap-1.5 ml-2">
+                  <div className={`w-2 h-2 rounded-full ${isLogsSseConnected ? 'bg-green-500 animate-pulse' : 'bg-slate-400 dark:bg-slate-600'}`} />
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">{isLogsSseConnected ? 'Live' : 'Disconnected'}</span>
+                </div>
+              </div>
+              <button onClick={() => setShowLogsPanel(false)} className="p-2 rounded-xl hover:bg-white/30 dark:hover:bg-white/[0.06] text-text-secondary/60 hover:text-text-main transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Console Content */}
+            <div className="flex-1 overflow-y-auto bg-white/5 dark:bg-white/5 p-4 font-mono text-sm custom-scrollbar">
+              {!logsContent ? (
+                <div className="flex items-center justify-center h-full text-slate-500 dark:text-slate-400">
+                  <div className="text-center">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="mx-auto mb-3 text-slate-400 dark:text-slate-500" strokeWidth="1.5">
+                      <polyline points="4 17 10 11 4 5"></polyline>
+                      <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                    <p className="text-sm">No console output yet</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Secretary execution logs will appear here in real-time</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap">
+                  {logsContent.split('\n').map((line, idx) => (
+                    <div
+                      key={idx}
+                      className={`leading-relaxed ${
+                        line.includes('error') || line.includes('ERROR')
+                          ? 'text-red-600'
+                          : line.includes('warn') || line.includes('WARN')
+                          ? 'text-yellow-600'
+                          : 'text-green-600'
+                      }`}
+                    >
+                      {line}
+                    </div>
+                  ))}
+                  <div ref={consoleEndRef} />
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -23,6 +23,7 @@ import { CLAUDE_DEFAULT_MODEL, normalizeClaudeModelId } from '@/lib/constants/cl
 import { loadMemory } from '@/lib/services/secretary-memory';
 import { searchMemory, type RetrievalResult } from '@/lib/services/memory-retriever';
 import { buildMemoryPromptBlockFromResults } from '@/lib/services/secretary-memory-prompt';
+import { timelineLogger } from '@/lib/services/timeline';
 
 // ========== Constants ==========
 
@@ -481,6 +482,7 @@ export interface ExecuteSecretaryClaudeParams {
 export interface ExecuteSecretaryClaudeResult {
   reply: string;
   newSessionId?: string;
+  conversationStats?: Record<string, unknown>;
 }
 
 /**
@@ -540,6 +542,9 @@ export async function executeSecretaryClaude(
 
   console.log(`[SecretaryClaude] Starting | session=${sessionId || 'new'} | request=${requestId} | skills=${enabledSkills.length} | pluginSkills=${pluginSkills.length}`);
 
+  const _startTime = Date.now();
+  timelineLogger.logSystem('secretary', `AI request started: "${message.slice(0, 80)}"`, 'info', undefined, { messageLength: message.length, skills: enabledSkills.length, sessionId: sessionId || 'new' }).catch(() => {});
+
   const configuredMaxTokens = Number(process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS);
   const maxOutputTokens = Number.isFinite(configuredMaxTokens) && configuredMaxTokens > 0
     ? configuredMaxTokens
@@ -549,6 +554,7 @@ export async function executeSecretaryClaude(
   const stderrBuffer: string[] = [];
   let fullReply = '';
   let newSessionId: string | undefined;
+  let conversationStats: Record<string, unknown> | undefined;
 
   // Try to import secretaryStream (may not exist yet if colleague hasn't created it)
   let secretaryStream: any = null;
@@ -618,6 +624,19 @@ export async function executeSecretaryClaude(
 
         const action = inferActionFromToolName(toolName);
         const filePath = extractPathFromInput(toolInput);
+        toolCallsLog.push({ toolName, filePath, action: action as string });
+
+        // Log tool result to timeline
+        const responsePreview = typeof toolResponse === 'string'
+          ? toolResponse.slice(0, 200)
+          : JSON.stringify(toolResponse).slice(0, 200);
+        timelineLogger.logSDK('secretary', `${action}: ${toolName}${filePath ? ` -> ${filePath}` : ''}`, 'info', undefined, {
+          toolName,
+          action,
+          filePath,
+          responseLength: typeof toolResponse === 'string' ? toolResponse.length : 0,
+          responsePreview,
+        }).catch(() => {});
         const maxLen = 2000;
         const truncatedResponse = typeof toolResponse === 'string' && toolResponse.length > maxLen
           ? toolResponse.slice(0, maxLen) + '\n...(truncated)'
@@ -655,6 +674,16 @@ export async function executeSecretaryClaude(
 
         console.log(`[SecretaryClaude] ❌ PostToolUseFailure: ${toolName} | id=${toolUseID}`);
 
+        // Log tool failure to timeline
+        const errAction = inferActionFromToolName(toolName);
+        const errFilePath = extractPathFromInput(toolInput);
+        const errMessage = typeof error === 'string' ? error : JSON.stringify(error);
+        timelineLogger.logError('secretary', `Tool failed: ${errAction} ${toolName}${errFilePath ? ` -> ${errFilePath}` : ''} - ${errMessage.slice(0, 200)}`, undefined, {
+          toolName,
+          action: errAction,
+          filePath: errFilePath,
+        }).catch(() => {});
+
         if (secretaryStream) {
           secretaryStream.publish({
             type: 'ai_tool_result',
@@ -689,6 +718,14 @@ export async function executeSecretaryClaude(
 
         console.log(`[SecretaryClaude] 🔧 PreToolUse: ${toolName} | id=${toolUseID}`);
 
+        // Log tool invocation to timeline
+        timelineLogger.logSDK('secretary', `Using tool: ${toolName}${filePath ? ` -> ${filePath}` : ''}`, 'info', undefined, {
+          toolName,
+          action,
+          filePath,
+          toolInputPreview: JSON.stringify(toolInput).slice(0, 300),
+        }).catch(() => {});
+
         // Publish ai_tool_use event BEFORE tool execution
         if (secretaryStream) {
           secretaryStream.publish({
@@ -722,6 +759,16 @@ export async function executeSecretaryClaude(
     const hasPlugins = plugins.length > 0;
     console.log(`[SecretaryClaude] 🚀 SDK query() options: { cwd: ${workDir}, plugins: ${hasPlugins ? plugins.length : 'none'}, model: ${finalModel} }`);
 
+    const systemPrompt = await buildSecretarySystemPrompt(enabledSkills, workDir, isIMMode, message);
+
+    // Log systemPrompt content
+    timelineLogger.logSystem('secretary', `System prompt built (${systemPrompt.length} chars)`, 'info', undefined, {
+      systemPromptPreview: systemPrompt.slice(0, 2000),
+      model: finalModel,
+      enabledSkills,
+      sessionId: sessionId || 'new',
+    }).catch(() => {});
+
     const response = query({
       prompt: message,
       options: {
@@ -730,7 +777,7 @@ export async function executeSecretaryClaude(
         model: finalModel,
         resume: sessionId,
         permissionMode: 'bypassPermissions',
-        systemPrompt: await buildSecretarySystemPrompt(enabledSkills, workDir, isIMMode, message),
+        systemPrompt,
         maxOutputTokens,
         pathToClaudeCodeExecutable: getClaudeCodeExecutablePath(),
         env: envWithBuiltinNode,
@@ -752,6 +799,7 @@ export async function executeSecretaryClaude(
     const assistantStreamStates = new Map<string, AssistantStreamState>();
     const completedStreamSessions = new Set<string>();
     let hasPublishedContent = false;
+    const toolCallsLog: Array<{ toolName: string; filePath?: string; action?: string }> = [];
 
     // Iterate streaming response
     for await (const msg of response) {
@@ -780,6 +828,10 @@ export async function executeSecretaryClaude(
               finalized: false,
             };
             assistantStreamStates.set(sessionKey, newState);
+            timelineLogger.logSDK('secretary', `SDK generate start`, 'info', undefined, {
+              sessionKey,
+              requestId,
+            }).catch(() => {});
             break;
           }
 
@@ -846,7 +898,12 @@ export async function executeSecretaryClaude(
               hasPublishedContent = true;
               completedStreamSessions.add(sessionKey);
               fullReply = trimmedContent;
-              // Note: Don't send ai_stream_end here, wait for final completion
+
+              // Log assistant message completion
+              timelineLogger.logSDK('secretary', `Assistant message generated (${trimmedContent.length} chars)`, 'info', undefined, {
+                contentLength: trimmedContent.length,
+                contentPreview: trimmedContent.slice(0, 200),
+              }).catch(() => {});
             }
 
             assistantStreamStates.delete(sessionKey);
@@ -863,6 +920,11 @@ export async function executeSecretaryClaude(
         if (initSessionId && typeof initSessionId === 'string') {
           console.log(`[SecretaryClaude] Session initialized: ${initSessionId}`);
           newSessionId = initSessionId;
+          timelineLogger.logSystem('secretary', `SDK session initialized: ${initSessionId}`, 'info', undefined, {
+            sessionId: initSessionId,
+            model: finalModel,
+            resumed: !!sessionId,
+          }).catch(() => {});
         }
         continue;
       }
@@ -903,9 +965,54 @@ export async function executeSecretaryClaude(
         continue;
       }
 
-      // ─── result: completion message ───
+      // ─── result: completion message + stats ───
       if (msg.type === 'result') {
-        console.log(`[SecretaryClaude] Task result: ${(msg as any).subtype || 'unknown'}`);
+        const resultMsg = msg as any;
+        const resultSubtype = resultMsg.subtype || 'unknown';
+        console.log(`[SecretaryClaude] Task result: ${resultSubtype}`);
+
+        // Extract conversation stats from SDK result
+        const statsData: Record<string, unknown> = {};
+        if (typeof resultMsg.duration_ms === 'number') statsData.duration_ms = resultMsg.duration_ms;
+        if (typeof resultMsg.duration_api_ms === 'number') statsData.duration_api_ms = resultMsg.duration_api_ms;
+        if (typeof resultMsg.total_cost_usd === 'number') statsData.total_cost_usd = resultMsg.total_cost_usd;
+        // Convert SDK usage from snake_case (input_tokens) to camelCase (inputTokens)
+        if (resultMsg.usage && typeof resultMsg.usage === 'object') {
+          const raw: any = resultMsg.usage;
+          statsData.usage = {
+            inputTokens: raw.inputTokens ?? raw.input_tokens ?? 0,
+            outputTokens: raw.outputTokens ?? raw.output_tokens ?? 0,
+            cacheReadInputTokens: raw.cacheReadInputTokens ?? raw.cache_read_input_tokens,
+            cacheCreationInputTokens: raw.cacheCreationInputTokens ?? raw.cache_creation_input_tokens,
+          };
+        }
+        if (resultMsg.modelUsage && typeof resultMsg.modelUsage === 'object') statsData.modelUsage = resultMsg.modelUsage;
+        if (typeof resultMsg.num_turns === 'number') statsData.num_turns = resultMsg.num_turns;
+
+        // Publish conversation_stats event for UI display
+        if (Object.keys(statsData).length > 0) {
+          conversationStats = statsData;
+        }
+        if (secretaryStream && conversationStats) {
+          secretaryStream.publish({
+            type: 'conversation_stats',
+            data: statsData,
+          });
+        }
+
+        // Log stats to timeline
+        const usageInfo = statsData.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+        timelineLogger.logSDK('secretary', `SDK execution completed: ${resultSubtype}`, 'info', undefined, {
+          resultSubtype,
+          hasPublishedContent,
+          toolsUsed: toolCallsLog.length,
+          durationMs: statsData.duration_ms,
+          durationApiMs: statsData.duration_api_ms,
+          costUsd: statsData.total_cost_usd,
+          inputTokens: usageInfo?.inputTokens,
+          outputTokens: usageInfo?.outputTokens,
+          numTurns: statsData.num_turns,
+        }).catch(() => {});
         continue;
       }
 
@@ -945,9 +1052,21 @@ export async function executeSecretaryClaude(
 
     console.log(`[SecretaryClaude] Completed | request=${requestId}${abortSignal?.aborted ? ' (aborted)' : ''}`);
 
+    const _elapsed = Date.now() - _startTime;
+    timelineLogger.logSDK('secretary', `AI request completed${abortSignal?.aborted ? ' (aborted)' : ''}`, 'info', undefined, {
+      userMessage: message.slice(0, 500),
+      replyLength: fullReply.length,
+      replyPreview: fullReply.slice(0, 1000),
+      sessionId: newSessionId || sessionId,
+      model: finalModel,
+      durationMs: _elapsed,
+      toolsUsed: toolCallsLog.slice(0, 50),
+    }).catch(() => {});
+
     return {
       reply: fullReply,
       newSessionId,
+      conversationStats,
     };
 
   } catch (error) {
@@ -988,6 +1107,9 @@ export async function executeSecretaryClaude(
       const tail = stderrBuffer.slice(-5).join(' ');
       errorContent = `AI 回复失败: ${errMsg || tail || '未知错误'}`;
     }
+
+    const _errTail = stderrBuffer.slice(-5).join(' ');
+    timelineLogger.logError('secretary', `AI request failed: ${errMsg || _errTail || 'unknown error'}`, undefined, { messageLength: message.length, sessionId: sessionId || 'new' }).catch(() => {});
 
     if (secretaryStream) {
       secretaryStream.publish({

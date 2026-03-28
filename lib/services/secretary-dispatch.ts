@@ -16,6 +16,7 @@ import {
   upsertUserRequest,
   markUserRequestAsProcessing,
 } from './user-requests';
+import { timelineLogger } from '@/lib/services/timeline';
 import path from 'path';
 
 /**
@@ -103,6 +104,16 @@ export async function dispatchToEmployee(
     });
     console.log(`[SecretaryDispatch] 📁 项目创建成功: id=${project.id}, name="${projectName}", mode=${mode}, type=${projectType}`);
 
+    timelineLogger.logSystem('secretary', `Project created for dispatch`, 'info', undefined, {
+      employeeId,
+      employeeName: employee.name,
+      projectId: project.id,
+      projectName,
+      mode,
+      projectType,
+      instruction: instruction.slice(0, 200),
+    }).catch(() => {});
+
     // Copy images to project assets if provided
     let finalInstruction = instruction;
     if (imageFiles && imageFiles.length > 0) {
@@ -157,6 +168,11 @@ export async function dispatchToEmployee(
     };
   } catch (error) {
     console.error(`[SecretaryDispatch] Failed to create project for dispatch:`, error);
+    timelineLogger.logError('secretary', `Dispatch project creation failed: ${error instanceof Error ? error.message : 'unknown'}`, undefined, {
+      employeeId,
+      employeeName: employee.name,
+      instruction: instruction.slice(0, 200),
+    }).catch(() => {});
     return {
       success: false,
       employeeId,

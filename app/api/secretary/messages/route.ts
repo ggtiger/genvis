@@ -230,6 +230,7 @@ async function handleAIReply(
         senderName: SECRETARY_SENDER_NAME,
         interactionMode: 'ai_chat',
         requestId,
+        metadata: result.conversationStats ? { conversationStats: result.conversationStats } : undefined,
       });
 
       // Only publish if persist succeeded
