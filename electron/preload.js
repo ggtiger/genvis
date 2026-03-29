@@ -80,6 +80,9 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   // Open file with system default application
   openFile: (filePath) => ipcRenderer.invoke('open-file', filePath),
 
+  // Show file/folder in system file manager (reveal in Finder/Explorer)
+  showInFolder: (itemPath) => ipcRenderer.invoke('show-in-folder', itemPath),
+
   // Open new window with options
   openNewWindow: (options) => ipcRenderer.invoke('open-new-window', options),
 

@@ -164,6 +164,7 @@ function WorkspaceContent() {
   const [inputControl, setInputControl] = useState<{ focus: () => void; setMessage: (msg: string) => void } | null>(null);
   const { settings: globalSettings } = useGlobalSettings();
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
 
   // Embedded page view from context
   const { openPage: openEmbeddedPage, closePage: closeEmbeddedPage, currentPage: embeddedPage } = useEmbeddedPage();
@@ -840,7 +841,7 @@ function WorkspaceContent() {
                 </header>
                 {/* Chat Panel fills the rest */}
                 <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-                  <SecretaryPanel />
+                  <SecretaryPanel onOpenSettings={(tab) => { setSettingsTab(tab); setShowSettings(true); }} />
                 </div>
               </main>
               {/* Right Sidebar - Dashboard */}
@@ -1276,7 +1277,8 @@ function WorkspaceContent() {
     {/* Settings Modal */}
     <GlobalSettings
       isOpen={showSettings}
-      onClose={() => setShowSettings(false)}
+      onClose={() => { setShowSettings(false); setSettingsTab(undefined); }}
+      initialTab={settingsTab as any}
     />
     </div>
   );

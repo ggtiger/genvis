@@ -33,6 +33,10 @@ import {
   Send,
   ScrollText,
   Filter,
+  ExternalLink,
+  FolderOpen,
+  FileIcon,
+  MessageSquare,
 } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import type { Employee } from '@/types/backend/employee';
@@ -306,47 +310,299 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
     }
   }
   const code = extractTextFromChildren(children);
+  const codeTrimmed = code.trim();
+  // Detect if the entire code block is a single local path/directory or URL
+  const isSingleLine = codeTrimmed.split('\n').length === 1;
+  const isPathContent = isSingleLine && /^\/[\w.@\-\u4e00-\u9fff\/]+$/.test(codeTrimmed);
+  const isUrlContent = isSingleLine && /^https?:\/\/\S+$/.test(codeTrimmed);
+  const hasDesktopAPI = typeof window !== 'undefined' && !!(window as any).desktopAPI;
   const handleCopy = async () => {
     try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ }
   };
   return (
     <div className="relative group my-2 rounded-lg overflow-hidden border border-white/15 dark:border-white/[0.06]">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 text-slate-300 dark:text-slate-600">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 text-blue-400">
         <span className="text-[11px] font-mono">{language || 'code'}</span>
-        <button onClick={handleCopy} className="px-2 py-0.5 rounded text-[11px] hover:bg-gray-700 flex items-center gap-1 transition-colors" title="复制">
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-          <span>{copied ? '已复制' : '复制'}</span>
-        </button>
+        <div className="flex items-center gap-1">
+          {isUrlContent && (
+            <button
+              onClick={() => handleOpenExternal(codeTrimmed)}
+              className="px-2 py-0.5 rounded text-[11px] hover:bg-gray-700 flex items-center gap-1 transition-colors text-blue-400"
+              title="在浏览器中打开"
+            >
+              <ExternalLink size={12} />
+              <span>打开链接</span>
+            </button>
+          )}
+          {isPathContent && hasDesktopAPI && (
+            <>
+              <button
+                onClick={() => {
+                  const p = codeTrimmed;
+                  if (p.endsWith('/') || !p.includes('.')) {
+                    if ((window as any).desktopAPI?.openFolder) (window as any).desktopAPI.openFolder(p);
+                  } else {
+                    handleOpenFile(p);
+                  }
+                }}
+                className="px-2 py-0.5 rounded text-[11px] hover:bg-gray-700 flex items-center gap-1 transition-colors text-blue-400"
+                title={codeTrimmed.endsWith('/') || !codeTrimmed.includes('.') ? '打开目录' : '打开文件'}
+              >
+                <ExternalLink size={12} />
+                <span>{codeTrimmed.endsWith('/') || !codeTrimmed.includes('.') ? '打开目录' : '打开文件'}</span>
+              </button>
+              <button
+                onClick={() => handleShowInFolder(codeTrimmed)}
+                className="px-2 py-0.5 rounded text-[11px] hover:bg-gray-700 flex items-center gap-1 transition-colors text-blue-400"
+                title="在 Finder 中显示"
+              >
+                <FolderOpen size={12} />
+                <span>定位</span>
+              </button>
+            </>
+          )}
+          <button onClick={handleCopy} className="px-2 py-0.5 rounded text-[11px] hover:bg-gray-700 flex items-center gap-1 transition-colors text-blue-400" title="复制">
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            <span>{copied ? '已复制' : '复制'}</span>
+          </button>
+        </div>
       </div>
       <pre className="bg-gray-900 text-gray-100 p-3 overflow-x-auto text-xs leading-5 m-0 whitespace-pre-wrap break-words max-w-full">{children}</pre>
     </div>
   );
 }
 
+// ========== Helper: detect local file path ==========
+// Require at least 2 path segments to avoid matching API endpoints like /todos, /messages
+const LOCAL_PATH_RE = /(?:^|\s)(\/[\w.@\-\u4e00-\u9fff]+(?:\/[\w.@\-\u4e00-\u9fff]+)+\/?)/g;
+const isLocalPath = (s: string) => /^\/[\w.@\-\u4e00-\u9fff]+\//.test(s) && !s.startsWith('http');
+const isWebUrl = (s: string) => /^https?:\/\//.test(s);
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico)(\?.*)?$/i;
+const isImageUrl = (s: string) => isWebUrl(s) && IMAGE_EXT_RE.test(s);
+const isLocalImagePath = (s: string) => isLocalPath(s) && IMAGE_EXT_RE.test(s);
+/** Convert local absolute path to API URL for serving */
+const localPathToSrc = (p: string) => `/api/local-file?path=${encodeURIComponent(p)}`;
+
+// Module-level callback for image preview overlay (connected by ImagePreviewOverlay component)
+let _openImagePreview: ((url: string) => void) | null = null;
+
+function handleOpenExternal(url: string) {
+  if (typeof window !== 'undefined' && (window as any).desktopAPI?.openExternal) {
+    (window as any).desktopAPI.openExternal(url);
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+function handleOpenFile(filePath: string) {
+  if (typeof window !== 'undefined' && (window as any).desktopAPI?.openFile) {
+    (window as any).desktopAPI.openFile(filePath);
+  }
+}
+function handleShowInFolder(filePath: string) {
+  if (typeof window !== 'undefined' && (window as any).desktopAPI?.showInFolder) {
+    (window as any).desktopAPI.showInFolder(filePath);
+  } else if (typeof window !== 'undefined' && (window as any).desktopAPI?.openFolder) {
+    // fallback: open parent directory
+    const parent = filePath.replace(/\/[^\/]+$/, '') || '/';
+    (window as any).desktopAPI.openFolder(parent);
+  }
+}
+
+/** Inline image with click-to-preview */
+function InlineImage({ src, alt }: { src: string; alt?: string }) {
+  return (
+    <span
+      className="inline-block my-1 cursor-pointer group/img relative"
+      onClick={() => _openImagePreview?.(src)}
+      title="点击预览"
+    >
+      <img
+        src={src}
+        alt={alt || '图片'}
+        className="max-w-full max-h-[300px] rounded-lg border border-white/10 dark:border-white/[0.06] shadow-sm transition-transform group-hover/img:shadow-md"
+        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+      />
+      <span className="absolute bottom-2 right-2 opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded">点击预览</span>
+    </span>
+  );
+}
+
+/** Image preview overlay - rendered inside SecretaryPanel, connected via module-level callback */
+function ImagePreviewOverlay() {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    _openImagePreview = (u: string) => setUrl(u);
+    return () => { _openImagePreview = null; };
+  }, []);
+  if (!url) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"
+      onClick={() => setUrl(null)}
+    >
+      <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <img src={url} alt="preview" className="max-w-full max-h-[85vh] rounded-xl shadow-2xl" />
+        <div className="absolute top-3 right-3 flex items-center gap-1.5">
+          <button
+            onClick={() => handleOpenExternal(url)}
+            className="p-2 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors" title="在浏览器中打开"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setUrl(null)}
+            className="p-2 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors" title="关闭"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Render a web URL link that opens in external browser */
+function WebLink({ href, children }: { href: string; children?: React.ReactNode }) {
+  return (
+    <button
+      onClick={(e) => { e.preventDefault(); handleOpenExternal(href); }}
+      className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer bg-transparent border-none p-0 font-inherit text-inherit"
+      title={`在浏览器中打开: ${href}`}
+    >
+      {children || href}
+      <ExternalLink className="inline w-3 h-3 ml-0.5 shrink-0 opacity-60" />
+    </button>
+  );
+}
+
+/** Render a local file path with open / reveal actions */
+function LocalPathLink({ filePath }: { filePath: string }) {
+  const hasDesktop = typeof window !== 'undefined' && !!(window as any).desktopAPI;
+  const isImage = IMAGE_EXT_RE.test(filePath);
+
+  return (
+    <span className="inline-block">
+      {/* If it's a local image, show it inline */}
+      {isImage && (
+        <span
+          className="block my-1 cursor-pointer group/img relative"
+          onClick={() => _openImagePreview?.(localPathToSrc(filePath))}
+          title="点击预览"
+        >
+          <img
+            src={localPathToSrc(filePath)}
+            alt={filePath.split('/').pop() || '图片'}
+            className="max-w-full max-h-[300px] rounded-lg border border-white/10 dark:border-white/[0.06] shadow-sm"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+          <span className="absolute bottom-2 right-2 opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded">点击预览</span>
+        </span>
+      )}
+      {/* Path tag with action buttons */}
+      <span className="inline-flex items-center gap-0.5 bg-blue-500/10 dark:bg-blue-400/10 rounded px-1.5 py-0.5 text-[13px] font-mono group">
+        <FileIcon className="w-3 h-3 shrink-0 text-blue-500 dark:text-blue-400" />
+        <span className="text-blue-600 dark:text-blue-400 break-all" title={filePath}>{filePath}</span>
+        {hasDesktop && (
+          <>
+            <button
+              onClick={() => handleOpenFile(filePath)}
+              className="ml-1 p-0.5 rounded hover:bg-blue-500/20 transition-colors text-blue-500 dark:text-blue-400" title="打开文件"
+            >
+              <ExternalLink className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => handleShowInFolder(filePath)}
+              className="p-0.5 rounded hover:bg-blue-500/20 transition-colors text-blue-500 dark:text-blue-400" title="打开所在位置"
+            >
+              <FolderOpen className="w-3 h-3" />
+            </button>
+          </>
+        )}
+      </span>
+    </span>
+  );
+}
+
+/** Process text children to detect and linkify local paths */
+function processTextWithPaths(text: string): React.ReactNode[] {
+  const result: React.ReactNode[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+  LOCAL_PATH_RE.lastIndex = 0;
+  while ((match = LOCAL_PATH_RE.exec(text)) !== null) {
+    const fullMatch = match[1];
+    const matchStart = match.index + (match[0].length - fullMatch.length);
+    if (matchStart > lastIdx) {
+      result.push(text.slice(lastIdx, matchStart));
+    }
+    result.push(<LocalPathLink key={`lp-${matchStart}`} filePath={fullMatch} />);
+    lastIdx = matchStart + fullMatch.length;
+  }
+  if (lastIdx < text.length) result.push(text.slice(lastIdx));
+  return result.length > 0 ? result : [text];
+}
+
+/** Wrap children to detect local paths in text nodes */
+function withPathDetection(children: React.ReactNode): React.ReactNode {
+  if (typeof children === 'string') {
+    const nodes = processTextWithPaths(children);
+    return nodes.length === 1 && typeof nodes[0] === 'string' ? children : <>{nodes}</>;
+  }
+  if (Array.isArray(children)) {
+    return children.map((child, i) => {
+      if (typeof child === 'string') {
+        const nodes = processTextWithPaths(child);
+        return nodes.length === 1 && typeof nodes[0] === 'string' ? child : <span key={i}>{nodes}</span>;
+      }
+      return child;
+    });
+  }
+  return children;
+}
+
 const mdComponents = {
-  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 last:mb-0 break-words">{children}</p>,
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 last:mb-0 break-words">{withPathDetection(children)}</p>,
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold">{children}</strong>,
   em: ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>,
-  code: ({ children, className }: { children?: React.ReactNode; className?: string }) => (
-    className
+  code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+    // If inline code (no className = not inside pre block), check if content is a local path or URL
+    if (!className && typeof children === 'string') {
+      const trimmed = children.trim();
+      if (isLocalPath(trimmed)) {
+        return <LocalPathLink filePath={trimmed} />;
+      }
+      if (isWebUrl(trimmed)) {
+        return <WebLink href={trimmed}><code className="bg-white/15 dark:bg-white/10 px-1.5 py-0.5 rounded text-[13px] font-mono text-primary">{children}</code></WebLink>;
+      }
+    }
+    return className
       ? <code className={className}>{children}</code>
-      : <code className="bg-white/15 dark:bg-white/10 px-1.5 py-0.5 rounded text-[13px] font-mono text-pink-600 dark:text-pink-400">{children}</code>
-  ),
+      : <code className="bg-white/15 dark:bg-white/10 px-1.5 py-0.5 rounded text-[13px] font-mono text-pink-600 dark:text-pink-400">{children}</code>;
+  },
   pre: ({ children }: { children?: React.ReactNode }) => <CodeBlock>{children}</CodeBlock>,
   ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
   ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-  li: ({ children }: { children?: React.ReactNode }) => <li className="mb-0.5 break-words">{children}</li>,
+  li: ({ children }: { children?: React.ReactNode }) => <li className="mb-0.5 break-words">{withPathDetection(children)}</li>,
   h1: ({ children }: { children?: React.ReactNode }) => <h1 className="text-lg font-bold mb-2 mt-3">{children}</h1>,
   h2: ({ children }: { children?: React.ReactNode }) => <h2 className="text-base font-bold mb-2 mt-3">{children}</h2>,
   h3: ({ children }: { children?: React.ReactNode }) => <h3 className="text-sm font-bold mb-1.5 mt-2">{children}</h3>,
   blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="border-l-3 border-violet-300 dark:border-violet-500/40 pl-3 my-2 text-text-secondary italic">{children}</blockquote>,
-  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 hover:opacity-80">{children}</a>,
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+    if (href && isImageUrl(href)) return <InlineImage src={href} alt={typeof children === 'string' ? children : undefined} />;
+    if (href && isLocalPath(href)) return <LocalPathLink filePath={href} />;
+    if (href && isWebUrl(href)) return <WebLink href={href}>{children}</WebLink>;
+    return <WebLink href={href || '#'}>{children}</WebLink>;
+  },
+  img: ({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>) => {
+    if (src && typeof src === 'string') return <InlineImage src={src} alt={alt} />;
+    return null;
+  },
   table: ({ children }: { children?: React.ReactNode }) => <div className="overflow-x-auto my-2"><table className="min-w-full text-xs border-collapse border border-border-subtle">{children}</table></div>,
   thead: ({ children }: { children?: React.ReactNode }) => <thead>{children}</thead>,
   tbody: ({ children }: { children?: React.ReactNode }) => <tbody>{children}</tbody>,
   tr: ({ children }: { children?: React.ReactNode }) => <tr className="border-b border-border-subtle">{children}</tr>,
   th: ({ children }: { children?: React.ReactNode }) => <th className="px-3 py-1.5 bg-bg-subtle border border-border-subtle text-left font-medium">{children}</th>,
-  td: ({ children }: { children?: React.ReactNode }) => <td className="px-3 py-1.5 border border-border-subtle">{children}</td>,
+  td: ({ children }: { children?: React.ReactNode }) => <td className="px-3 py-1.5 border border-border-subtle">{withPathDetection(children)}</td>,
   hr: () => <hr className="my-3 border-border-subtle" />,
 };
 
@@ -970,7 +1226,7 @@ function SecretaryMessageBubble({ message, isStreaming }: { message: SecretaryMe
 // ========== Main Component ==========
 
 interface SecretaryPanelProps {
-  onOpenSettings?: () => void;
+  onOpenSettings?: (tab?: string) => void;
 }
 
 // ========== @Mention types ==========
@@ -1045,6 +1301,7 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
   const [aborting, setAborting] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [llmError, setLlmError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [total, setTotal] = useState(0);
@@ -1470,6 +1727,12 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
           setAborting(false);
           const endRequestId = data.data?.requestId;
           const persistSuccess = data.data?.persistSuccess !== false; // default to true for backward compat
+
+          // Detect AI error in stream end (e.g. "AI 回复失败: Claude Code process exited with code 1")
+          const streamEndError = data.data?.error;
+          if (streamEndError && typeof streamEndError === 'string') {
+            setLlmError(streamEndError);
+          }
           
           // Refresh messages with retry mechanism to handle DB write delay
           const refreshWithRetry = async (attempt = 0) => {
@@ -1546,9 +1809,40 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
           updateToolSummary();
         }
 
+        // AI notification from SDK
+        if (data.type === 'ai_notification') {
+          const { title, message: notifMsg, notificationType } = data.data || {};
+          const displayMsg = [title, notifMsg].filter(Boolean).join(': ') || 'SDK 通知';
+          if (notificationType === 'error') {
+            toast.error(displayMsg, 5000);
+            // Detect LLM API configuration errors
+            const errText = displayMsg.toLowerCase();
+            if (errText.includes('api') || errText.includes('key') || errText.includes('auth') ||
+                errText.includes('model') || errText.includes('401') || errText.includes('403') ||
+                errText.includes('unauthorized') || errText.includes('invalid') ||
+                errText.includes('connection') || errText.includes('endpoint') ||
+                errText.includes('apikey') || errText.includes('token')) {
+              setLlmError(displayMsg);
+            }
+          } else {
+            toast.info(displayMsg, 4000);
+          }
+        }
+
         // Error
         if (data.type === 'error') {
-          // SSE error from server
+          const errMsg = data.data?.message || data.data?.error || '';
+          if (errMsg) {
+            toast.error(errMsg, 5000);
+            // Detect LLM configuration issues
+            const errText = errMsg.toLowerCase();
+            if (errText.includes('api') || errText.includes('key') || errText.includes('auth') ||
+                errText.includes('model') || errText.includes('401') || errText.includes('403') ||
+                errText.includes('unauthorized') || errText.includes('connection') ||
+                errText.includes('endpoint') || errText.includes('token')) {
+              setLlmError(errMsg);
+            }
+          }
         }
 
         // Dispatch completed notification
@@ -2297,6 +2591,34 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0 relative">
+      <ImagePreviewOverlay />
+      {/* IM not connected banner */}
+      {imChannelStatuses.length === 0 || !imChannelStatuses.some(s => s.connectionStatus === 'connected') ? (
+        <button
+          onClick={() => onOpenSettings?.('im-channels')}
+          className="mx-4 mt-3 lg:mx-8 flex items-center gap-2 px-3 py-2 bg-amber-500/10 dark:bg-amber-400/10 border border-amber-500/20 dark:border-amber-400/20 rounded-xl text-amber-700 dark:text-amber-400 text-xs hover:bg-amber-500/20 dark:hover:bg-amber-400/20 transition-colors cursor-pointer"
+        >
+          <MessageSquare className="w-4 h-4 shrink-0" />
+          <span>未绑定 IM 渠道，无法接收即时消息。</span>
+          <span className="ml-auto text-amber-600 dark:text-amber-300 font-medium underline underline-offset-2">前往设置 &rarr;</span>
+        </button>
+      ) : null}
+      {/* LLM API error banner */}
+      {llmError && (
+        <div className="mx-4 mt-2 lg:mx-8 flex items-center gap-2 px-3 py-2 bg-red-500/10 dark:bg-red-400/10 border border-red-500/20 dark:border-red-400/20 rounded-xl text-red-700 dark:text-red-400 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span className="flex-1 truncate">模型接口异常：{llmError}</span>
+          <button
+            onClick={() => { onOpenSettings?.('ai-agents'); setLlmError(null); }}
+            className="ml-auto shrink-0 text-red-600 dark:text-red-300 font-medium underline underline-offset-2 hover:opacity-80"
+          >
+            配置 LLM API &rarr;
+          </button>
+          <button onClick={() => setLlmError(null)} className="p-0.5 hover:bg-red-500/20 rounded transition-colors">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
       {/* Messages - with bottom padding for floating input */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-48 lg:px-8 lg:pt-6 flex flex-col gap-4">
         {hasMore && (

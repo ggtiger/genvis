@@ -25,7 +25,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '';
 interface GlobalSettingsProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'general' | 'ai-agents' | 'services' | 'skills' | 'appearance';
+  initialTab?: string;
   embedded?: boolean; // New prop for non-modal mode
 }
 
@@ -144,6 +144,17 @@ export default function GlobalSettings({ isOpen, onClose, initialTab = 'ai-agent
   const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<string, boolean>>({});
   const [apiTestState, setApiTestState] = useState<Record<string, 'idle' | 'testing' | 'success' | 'error'>>({});
   const [apiTestMessage, setApiTestMessage] = useState<Record<string, string>>({});
+
+  // Sync active tab when initialTab changes (e.g., opened from a specific banner)
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      const tab = (initialTab === 'general' ? 'ai-agents' : initialTab) as SettingsTabId;
+      if (SETTINGS_TABS.some(t => t.id === tab)) {
+        setActiveTab(tab);
+        setVisitedTabs(prev => new Set([...prev, tab]));
+      }
+    }
+  }, [isOpen, initialTab]);
 
   // Show toast function
   const showToast = (message: string, type: 'success' | 'error') => {

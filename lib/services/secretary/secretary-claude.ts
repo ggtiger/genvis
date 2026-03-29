@@ -12,7 +12,18 @@
  * Modeled after lib/services/lan-peer/lan-claude.ts
  */
 
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  type SDKMessage,
+  type SDKResultMessage,
+  type SDKAssistantMessage,
+  type SDKSystemMessage,
+  type SDKPartialAssistantMessage,
+  type HookInput,
+  type SyncHookJSONOutput,
+  type HookCallback,
+  type Options,
+} from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
@@ -24,6 +35,7 @@ import { loadMemory } from '@/lib/services/secretary-memory';
 import { searchMemory, type RetrievalResult } from '@/lib/services/memory-retriever';
 import { buildMemoryPromptBlockFromResults } from '@/lib/services/secretary-memory-prompt';
 import { timelineLogger } from '@/lib/services/timeline';
+import { inferActionFromToolName, extractPathFromInput, type ToolAction } from '@/lib/utils/sdk-tool-helpers';
 
 // ========== Constants ==========
 
@@ -33,52 +45,22 @@ export const SECRETARY_SENDER_NAME = '秘书';
 // Default work directory for secretary file operations
 const SECRETARY_WORK_DIR = path.join(process.cwd(), 'data', 'secretary-uploads');
 
-// ========== Tool Action Inference ==========
-
-type ToolAction = 'Read' | 'Created' | 'Edited' | 'Deleted' | 'Searched' | 'Executed' | 'Generated';
-
-const TOOL_NAME_ACTION_MAP: Record<string, ToolAction> = {
-  Read: 'Read', read: 'Read', read_file: 'Read', 'read-file': 'Read',
-  Write: 'Created', write: 'Created', write_file: 'Created', 'write-file': 'Created', create_file: 'Created',
-  Edit: 'Edited', edit: 'Edited', edit_file: 'Edited', 'edit-file': 'Edited', update_file: 'Edited', apply_patch: 'Edited', patch_file: 'Edited',
-  remove_file: 'Deleted', delete_file: 'Deleted', delete: 'Deleted', remove: 'Deleted',
-  list_files: 'Searched', list: 'Searched', ls: 'Searched',
-  Glob: 'Searched', glob: 'Searched', glob_files: 'Searched', search_files: 'Searched',
-  Grep: 'Searched', grep: 'Searched',
-  Bash: 'Executed', bash: 'Executed', run: 'Executed', run_bash: 'Executed', shell: 'Executed',
-  Skill: 'Executed', skill: 'Executed',
-  todo_write: 'Generated', todo: 'Generated', plan_write: 'Generated',
-};
-
-function inferActionFromToolName(toolName: string): ToolAction {
-  const normalized = toolName.trim().toLowerCase();
-  if (TOOL_NAME_ACTION_MAP[toolName]) return TOOL_NAME_ACTION_MAP[toolName];
-  if (TOOL_NAME_ACTION_MAP[normalized]) return TOOL_NAME_ACTION_MAP[normalized];
-  const suffix = normalized.split(':').pop() ?? normalized;
-  if (suffix && TOOL_NAME_ACTION_MAP[suffix]) return TOOL_NAME_ACTION_MAP[suffix];
-  // Fallback heuristics
-  if (/read|open|view/i.test(normalized)) return 'Read';
-  if (/write|create|add/i.test(normalized)) return 'Created';
-  if (/edit|modify|update|patch/i.test(normalized)) return 'Edited';
-  if (/delete|remove/i.test(normalized)) return 'Deleted';
-  if (/search|find|list|glob|ls|grep/i.test(normalized)) return 'Searched';
-  if (/execute|exec|run|bash|shell|command/i.test(normalized)) return 'Executed';
-  return 'Executed';
-}
-
-function extractPathFromInput(toolInput: Record<string, unknown>): string | undefined {
-  const keys = ['file_path', 'filePath', 'path', 'target', 'file', 'filename', 'directory', 'dir', 'pattern', 'command'];
-  for (const key of keys) {
-    const val = toolInput[key];
-    if (typeof val === 'string' && val.trim()) return val.trim();
-  }
-  return undefined;
-}
+// Tool action inference imported from '@/lib/utils/sdk-tool-helpers'
 
 // ========== Config Loader ==========
 
-async function loadAndApplyClaudeConfig(): Promise<string | undefined> {
-  let customModel: string | undefined;
+interface ClaudeConfig {
+  baseUrl?: string;
+  authToken?: string;
+  customModel?: string;
+}
+
+/**
+ * Load Claude API config from global settings.
+ * Returns a pure config object — does NOT mutate process.env.
+ */
+async function loadClaudeConfig(): Promise<ClaudeConfig> {
+  const config: ClaudeConfig = {};
   try {
     const { loadGlobalSettings } = await import('@/lib/services/settings');
     const globalSettings = await loadGlobalSettings();
@@ -86,71 +68,45 @@ async function loadAndApplyClaudeConfig(): Promise<string | undefined> {
 
     if (claudeSettings) {
       if (typeof claudeSettings.apiUrl === 'string' && claudeSettings.apiUrl.trim()) {
-        process.env.ANTHROPIC_BASE_URL = claudeSettings.apiUrl.trim();
-      } else if (!process.env.ANTHROPIC_BASE_URL) {
-        process.env.ANTHROPIC_BASE_URL = 'https://api.100agent.co';
+        config.baseUrl = claudeSettings.apiUrl.trim();
       }
-
       if (typeof claudeSettings.apiKey === 'string' && claudeSettings.apiKey.trim()) {
-        process.env.ANTHROPIC_AUTH_TOKEN = claudeSettings.apiKey.trim();
+        config.authToken = claudeSettings.apiKey.trim();
       }
-
       if (typeof claudeSettings.customModel === 'string' && claudeSettings.customModel.trim()) {
-        customModel = claudeSettings.customModel.trim();
+        config.customModel = claudeSettings.customModel.trim();
       }
     }
   } catch (error) {
     console.error('[SecretaryClaude] Failed to load config:', error);
   }
-  return customModel;
+  return config;
 }
 
-// ========== System Prompt Builder ==========
+// ========== System Prompt Builder (modularized, Task 8) ==========
 
-/**
- * Build the complete system prompt for secretary with smart routing.
- * Includes:
- * - SOUL personality block
- * - Memory content
- * - API skill registry (first-level routing)
- * - Skill SKILL.md content (second-level routing)
- * - General capabilities (third-level fallback)
- * - Employee list with @dispatch instructions
- */
-export async function buildSecretarySystemPrompt(
-  enabledSkills: string[] = [],
-  workDir: string = SECRETARY_WORK_DIR,
-  isIMMode: boolean = false,
-  message?: string
-): Promise<string> {
-  const parts: string[] = [];
-  
-  // Track API-registered skills to avoid duplicate Skill tool injection
-  let apiRegisteredSkillNames: Set<string> = new Set();
-
-  // 1. Base identity
-  parts.push(`你是秘书助手，请根据用户需求自动选择最佳执行方式。`);
-
-  // 2. SOUL personality block
+/** Build SOUL personality block */
+async function buildSoulSection(): Promise<string | null> {
   try {
     const soulBlock = await buildSoulPromptBlock();
     if (soulBlock) {
-      parts.push(`\n========== 人格设定 ==========\n${soulBlock}\n==============================`);
+      return `\n========== 人格设定 ==========\n${soulBlock}\n==============================`;
     }
   } catch (err) {
     console.warn('[SecretaryClaude] Failed to load SOUL block:', err);
   }
+  return null;
+}
 
-  // 3. Memory content (BM25 retrieval-based)
+/** Build memory section via BM25 retrieval */
+async function buildMemorySection(message?: string): Promise<string | null> {
   try {
     const memory = await loadMemory();
     let retrievalResults: RetrievalResult[] = [];
-    
-    // Check if this is an identity query - return all user_profile entries
+
     const isIdentityQuery = message && /^(我是谁|你认识我吗|你知道我是谁|我的信息|我的资料|关于我)/.test(message.trim());
-    
+
     if (isIdentityQuery) {
-      // Directly return all user_profile entries as high-score results
       retrievalResults = (memory.user_profile || []).map(entry => ({
         entry,
         score: 1.0,
@@ -158,252 +114,204 @@ export async function buildSecretarySystemPrompt(
       }));
       console.log(`[SecretaryClaude] Identity query detected, returning ${retrievalResults.length} user_profile entries`);
     } else if (message && message.trim().length > 1) {
-      // Use BM25 retrieval for other queries
       retrievalResults = searchMemory(message.trim(), memory, 10);
       console.log(`[SecretaryClaude] BM25 retrieval: ${retrievalResults.length} results for query "${message.slice(0, 50)}"`);
     }
-    
-    // Format retrieval results into prompt block
+
     const memoryBlock = buildMemoryPromptBlockFromResults(retrievalResults);
     if (memoryBlock) {
-      parts.push(
-        `\n========== 记忆 ==========\n` +
-        memoryBlock +
-        `\n==========================`
-      );
+      return `\n========== 记忆 ==========\n${memoryBlock}\n==========================`;
     }
   } catch (err) {
     console.warn('[SecretaryClaude] Failed to load memory:', err);
   }
+  return null;
+}
 
-  // 4. API Skill Registry (first-level routing)
+/** Build API skill registry section. Returns section text + set of registered skill names. */
+async function buildApiRegistrySection(): Promise<{ section: string | null; registeredNames: Set<string> }> {
+  const registeredNames = new Set<string>();
   try {
     const registryPath = path.join(process.cwd(), 'data', 'api-skill-registry.json');
-    if (fsSync.existsSync(registryPath)) {
-      const registryContent = await fs.readFile(registryPath, 'utf-8');
-      const registry = JSON.parse(registryContent);
-      
-      if (registry.skills && Array.isArray(registry.skills) && registry.skills.length > 0) {
-        // 动态获取已部署技能的端口
-        let deployedSkillPorts: Record<string, number> = {};
-        try {
-          const pluginExPath = path.join(process.cwd(), 'data', 'user-skills', '.claude-plugin', 'plugin-ex.json');
-          if (fsSync.existsSync(pluginExPath)) {
-            const pluginExContent = await fs.readFile(pluginExPath, 'utf-8');
-            const pluginEx = JSON.parse(pluginExContent);
-            if (pluginEx.deployedSkills) {
-              for (const [name, meta] of Object.entries(pluginEx.deployedSkills)) {
-                const m = meta as any;
-                if (m.port && (m.status === 'deployed' || m.status === 'running')) {
-                  deployedSkillPorts[name] = m.port;
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('[SecretaryClaude] Failed to read deployed skill ports:', err);
-        }
-        console.log(`[SecretaryClaude] API skill ports: ${JSON.stringify(deployedSkillPorts)}`);
-
-        // Build set of skills that use relative URLs (main service port, no independent port)
-        const relativeUrlSkills = new Set<string>();
-        for (const skillDir of [path.join(process.cwd(), 'skills'), path.join(process.cwd(), 'data', 'user-skills')]) {
-          try {
-            const entries = await fs.readdir(skillDir);
-            for (const entry of entries) {
-              try {
-                const epContent = await fs.readFile(path.join(skillDir, entry, 'api-endpoints.json'), 'utf-8');
-                const epData = JSON.parse(epContent);
-                if (epData.useRelativeUrl && epData.skillName) {
-                  relativeUrlSkills.add(epData.skillName);
-                }
-              } catch {}
-            }
-          } catch {}
-        }
-        console.log(`[SecretaryClaude] Relative URL skills: ${[...relativeUrlSkills].join(', ') || 'none'}`);
-
-        const apiEndpoints: string[] = [];
-        apiEndpoints.push('## 可用 API 接口\n');
-        apiEndpoints.push('以下接口可通过 Bash 工具使用 curl 调用:\n');
-        
-        for (const skill of registry.skills) {
-          const skillName = skill.skillName;
-          const skillPort = deployedSkillPorts[skillName];
-          
-          // Track API-registered skill names to avoid duplicate Skill tool injection
-          apiRegisteredSkillNames.add(skillName);
-          
-          // Determine base URL: independent port, main service port (relativeUrl), or unavailable
-          let baseUrl: string | null = null;
-          if (skillPort) {
-            baseUrl = `http://localhost:${skillPort}`;
-          } else if (relativeUrlSkills.has(skillName)) {
-            baseUrl = `http://localhost:${process.env.PORT || '3000'}`;
-          }
-
-          if (!baseUrl) {
-            // 技能未运行且非主服务路由，跳过或标注
-            apiEndpoints.push(`### ${skill.displayName || skillName} (⚠️ 未运行)`);
-            apiEndpoints.push(`描述: ${skill.description || '无描述'}`);
-            apiEndpoints.push('**注意**: 该技能当前未运行，API 不可用\n');
-            continue;
-          }
-          apiEndpoints.push(`### ${skill.displayName || skillName}`);
-          apiEndpoints.push(`描述: ${skill.description || '无描述'}`);
-          apiEndpoints.push(`服务地址: ${baseUrl}`);
-          
-          if (skill.endpoints && Array.isArray(skill.endpoints)) {
-            for (const endpoint of skill.endpoints) {
-              const params = endpoint.parameters?.map((p: any) => 
-                `${p.name}${p.required ? '*' : ''}: ${p.type} - ${p.description || ''}`
-              ).join(', ') || '无参数';
-              
-              apiEndpoints.push(`- ${endpoint.method} ${baseUrl}${endpoint.path}: ${endpoint.description || ''}`);
-              apiEndpoints.push(`  参数: ${params}`);
-            }
-          }
-          apiEndpoints.push('');
-        }
-        
-        // 生成示例（使用第一个可用技能的端口）
-        const firstAvailablePort = Object.values(deployedSkillPorts)[0] || Number(process.env.PORT || '3000');
-        if (firstAvailablePort) {
-          apiEndpoints.push('调用方法: 使用 Bash 工具执行 curl 命令，例如:');
-          apiEndpoints.push('```bash');
-          apiEndpoints.push(`curl -s -X GET "http://localhost:${firstAvailablePort}/api/todos"`);
-          apiEndpoints.push(`curl -s -X POST "http://localhost:${firstAvailablePort}/api/todos" -H "Content-Type: application/json" -d '{"title": "任务名称"}'`);
-          apiEndpoints.push('```\n');
-        }
-        
-        parts.push(apiEndpoints.join('\n'));
-      }
-    }
-  } catch (err) {
-    console.warn('[SecretaryClaude] Failed to load API skill registry:', err);
-  }
-
-  // 5. Skill SKILL.md injection (second-level routing)
-  if (enabledSkills.length > 0) {
-    const skillsRoot = path.join(process.cwd(), 'skills');
-    const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
-    const skillDescriptions: string[] = [];
-    skillDescriptions.push('## 可用技能插件\n');
-    skillDescriptions.push('**重要：使用 Skill 工具调用技能，不要手动执行脚本！**\n');
-
-    for (const skillName of enabledSkills) {
-      // Skip skills already registered in API registry (they use curl, not Skill tool)
-      if (apiRegisteredSkillNames.has(skillName)) {
-        console.log(`[SecretaryClaude] ⏭️ Skipping SKILL.md for ${skillName} (API registry skill)`);
-        continue;
-      }
-      
-      // Priority: user-skills > builtin skills
-      const userPath = path.join(userSkillsRoot, skillName, 'SKILL.md');
-      const builtinPath = path.join(skillsRoot, skillName, 'SKILL.md');
-      const userSkillDir = path.join(userSkillsRoot, skillName);
-      const builtinSkillDir = path.join(skillsRoot, skillName);
-      let skillContent: string | null = null;
-      let actualSkillDir: string | null = null;
-
-      try {
-        await fs.access(userPath);
-        skillContent = await fs.readFile(userPath, 'utf-8');
-        actualSkillDir = userSkillDir;
-        console.log(`[SecretaryClaude] 📖 Loaded SKILL.md from user-skills: ${skillName}`);
-      } catch {}
-
-      if (!skillContent) {
-        try {
-          await fs.access(builtinPath);
-          skillContent = await fs.readFile(builtinPath, 'utf-8');
-          actualSkillDir = builtinSkillDir;
-          console.log(`[SecretaryClaude] 📖 Loaded SKILL.md from skills: ${skillName}`);
-        } catch {
-          console.warn(`[SecretaryClaude] ⚠️ SKILL.md not found for skill: ${skillName}`);
-        }
-      }
-
-      if (skillContent && actualSkillDir) {
-        // Strip frontmatter (---...--- block) for cleaner injection
-        let contentWithoutFrontmatter = skillContent.replace(/^---\n[\s\S]*?---\n/, '').trim();
-        // Replace ${SKILL_DIR} placeholder with actual path
-        contentWithoutFrontmatter = contentWithoutFrontmatter.replace(/\$\{SKILL_DIR\}/g, actualSkillDir);
-        skillDescriptions.push(
-          `### ${skillName}\n${contentWithoutFrontmatter.slice(0, 800)}${contentWithoutFrontmatter.length > 800 ? '...' : ''}\n`
-        );
-      }
+    if (!fsSync.existsSync(registryPath)) return { section: null, registeredNames };
+    const registryContent = await fs.readFile(registryPath, 'utf-8');
+    const registry = JSON.parse(registryContent);
+    if (!registry.skills || !Array.isArray(registry.skills) || registry.skills.length === 0) {
+      return { section: null, registeredNames };
     }
 
-    if (skillDescriptions.length > 1) {
-      parts.push(skillDescriptions.join('\n'));
-    }
-  }
-
-  // 6. Employee list with @dispatch instructions
-  // Skip employee dispatch capability in IM mode to prevent auto-dispatch
-  if (!isIMMode) {
-    // Read from both builtin-employees.json and data/employees/user-employees.json
+    // Deployed skill ports
+    let deployedSkillPorts: Record<string, number> = {};
     try {
-      const allEmployees: Array<{ id: string; name: string; description: string; mode: string }> = [];
-        
-      // Load builtin employees
-      const builtinPath = path.join(process.cwd(), 'builtin-employees.json');
-      if (fsSync.existsSync(builtinPath)) {
-        const builtinContent = await fs.readFile(builtinPath, 'utf-8');
-        const builtinData = JSON.parse(builtinContent);
-        if (builtinData.employees && Array.isArray(builtinData.employees)) {
-          allEmployees.push(...builtinData.employees);
+      const pluginExPath = path.join(process.cwd(), 'data', 'user-skills', '.claude-plugin', 'plugin-ex.json');
+      if (fsSync.existsSync(pluginExPath)) {
+        const pluginExContent = await fs.readFile(pluginExPath, 'utf-8');
+        const pluginEx = JSON.parse(pluginExContent);
+        if (pluginEx.deployedSkills) {
+          for (const [name, meta] of Object.entries(pluginEx.deployedSkills)) {
+            const m = meta as any;
+            if (m.port && (m.status === 'deployed' || m.status === 'running')) {
+              deployedSkillPorts[name] = m.port;
+            }
+          }
         }
-      }
-        
-      // Load custom employees from data/employees/user-employees.json
-      const userEmployeesPath = path.join(process.cwd(), 'data', 'employees', 'user-employees.json');
-      if (fsSync.existsSync(userEmployeesPath)) {
-        const userContent = await fs.readFile(userEmployeesPath, 'utf-8');
-        const userData = JSON.parse(userContent);
-        if (userData.employees && Array.isArray(userData.employees)) {
-          allEmployees.push(...userData.employees);
-          console.log(`[SecretaryClaude] Loaded ${userData.employees.length} custom employees`);
-        }
-      }
-        
-      if (allEmployees.length > 0) {
-        const employeeList: string[] = [];
-        employeeList.push('## 可用员工\n');
-        employeeList.push('当用户消息中包含 @员工名 时，通过 Bash 工具调用派发 API：\n');
-          
-        // Get the server port dynamically
-        const serverPort = process.env.PORT || '3000';
-          
-        for (const emp of allEmployees) {
-          // Skip secretary and non-dispatchable modes
-          if (emp.mode === 'secretary' || emp.mode === 'boss' || emp.mode === 'cli') continue;
-            
-          employeeList.push(`- **${emp.name}** (ID: ${emp.id})`);
-          employeeList.push(`  能力: ${emp.description}`);
-          employeeList.push(`  触发: @${emp.name}`);
-        }
-          
-        employeeList.push('\n**派发方法**: 使用 POST /api/projects 接口创建项目并自动启动');
-        employeeList.push('```bash');
-        employeeList.push(`curl -s -X POST "http://localhost:${serverPort}/api/projects" \\`);
-        employeeList.push('  -H "Content-Type: application/json" \\');
-        employeeList.push(`  -d '{"project_id":"p-xxx","name":"任务名称","initialPrompt":"具体任务指令","employee_id":"员工ID","mode":"code","autoStart":true}'`);
-        employeeList.push('```\n');
-          
-        parts.push(employeeList.join('\n'));
       }
     } catch (err) {
-      console.warn('[SecretaryClaude] Failed to load employees:', err);
+      console.warn('[SecretaryClaude] Failed to read deployed skill ports:', err);
+    }
+    console.log(`[SecretaryClaude] API skill ports: ${JSON.stringify(deployedSkillPorts)}`);
+
+    // Relative URL skills
+    const relativeUrlSkills = new Set<string>();
+    for (const skillDir of [path.join(process.cwd(), 'skills'), path.join(process.cwd(), 'data', 'user-skills')]) {
+      try {
+        const entries = await fs.readdir(skillDir);
+        for (const entry of entries) {
+          try {
+            const epContent = await fs.readFile(path.join(skillDir, entry, 'api-endpoints.json'), 'utf-8');
+            const epData = JSON.parse(epContent);
+            if (epData.useRelativeUrl && epData.skillName) relativeUrlSkills.add(epData.skillName);
+          } catch {}
+        }
+      } catch {}
+    }
+    console.log(`[SecretaryClaude] Relative URL skills: ${[...relativeUrlSkills].join(', ') || 'none'}`);
+
+    const lines: string[] = ['## 可用 API 接口\n', '以下接口可通过 Bash 工具使用 curl 调用:\n'];
+    for (const skill of registry.skills) {
+      const skillName = skill.skillName;
+      const skillPort = deployedSkillPorts[skillName];
+      registeredNames.add(skillName);
+
+      let baseUrl: string | null = null;
+      if (skillPort) baseUrl = `http://localhost:${skillPort}`;
+      else if (relativeUrlSkills.has(skillName)) baseUrl = `http://localhost:${process.env.PORT || '3000'}`;
+
+      if (!baseUrl) {
+        lines.push(`### ${skill.displayName || skillName} (⚠️ 未运行)`);
+        lines.push(`描述: ${skill.description || '无描述'}`);
+        lines.push('**注意**: 该技能当前未运行，API 不可用\n');
+        continue;
+      }
+      lines.push(`### ${skill.displayName || skillName}`);
+      lines.push(`描述: ${skill.description || '无描述'}`);
+      lines.push(`服务地址: ${baseUrl}`);
+      if (skill.endpoints && Array.isArray(skill.endpoints)) {
+        for (const endpoint of skill.endpoints) {
+          const params = endpoint.parameters?.map((p: any) =>
+            `${p.name}${p.required ? '*' : ''}: ${p.type} - ${p.description || ''}`
+          ).join(', ') || '无参数';
+          lines.push(`- ${endpoint.method} ${baseUrl}${endpoint.path}: ${endpoint.description || ''}`);
+          lines.push(`  参数: ${params}`);
+        }
+      }
+      lines.push('');
+    }
+    const firstPort = Object.values(deployedSkillPorts)[0] || Number(process.env.PORT || '3000');
+    if (firstPort) {
+      lines.push('调用方法: 使用 Bash 工具执行 curl 命令，例如:');
+      lines.push('```bash');
+      lines.push(`curl -s -X GET "http://localhost:${firstPort}/api/todos"`);
+      lines.push(`curl -s -X POST "http://localhost:${firstPort}/api/todos" -H "Content-Type: application/json" -d '{"title": "任务名称"}'`);
+      lines.push('```\n');
+    }
+    return { section: lines.join('\n'), registeredNames };
+  } catch (err) {
+    console.warn('[SecretaryClaude] Failed to load API skill registry:', err);
+    return { section: null, registeredNames };
+  }
+}
+
+/** Build skill SKILL.md descriptions section */
+async function buildSkillDescriptionsSection(
+  enabledSkills: string[],
+  apiRegisteredSkillNames: Set<string>
+): Promise<string | null> {
+  if (enabledSkills.length === 0) return null;
+  const skillsRoot = path.join(process.cwd(), 'skills');
+  const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
+  const lines: string[] = ['## 可用技能插件\n', '**重要：使用 Skill 工具调用技能，不要手动执行脚本！**\n'];
+
+  for (const skillName of enabledSkills) {
+    if (apiRegisteredSkillNames.has(skillName)) {
+      console.log(`[SecretaryClaude] Skipping SKILL.md for ${skillName} (API registry skill)`);
+      continue;
+    }
+    const userPath = path.join(userSkillsRoot, skillName, 'SKILL.md');
+    const builtinPath = path.join(skillsRoot, skillName, 'SKILL.md');
+    let skillContent: string | null = null;
+    let actualSkillDir: string | null = null;
+
+    try {
+      await fs.access(userPath);
+      skillContent = await fs.readFile(userPath, 'utf-8');
+      actualSkillDir = path.join(userSkillsRoot, skillName);
+      console.log(`[SecretaryClaude] Loaded SKILL.md from user-skills: ${skillName}`);
+    } catch {}
+    if (!skillContent) {
+      try {
+        await fs.access(builtinPath);
+        skillContent = await fs.readFile(builtinPath, 'utf-8');
+        actualSkillDir = path.join(skillsRoot, skillName);
+        console.log(`[SecretaryClaude] Loaded SKILL.md from skills: ${skillName}`);
+      } catch {
+        console.warn(`[SecretaryClaude] SKILL.md not found for skill: ${skillName}`);
+      }
+    }
+    if (skillContent && actualSkillDir) {
+      let cleaned = skillContent.replace(/^---\n[\s\S]*?---\n/, '').trim();
+      cleaned = cleaned.replace(/\$\{SKILL_DIR\}/g, actualSkillDir);
+      lines.push(`### ${skillName}\n${cleaned.slice(0, 800)}${cleaned.length > 800 ? '...' : ''}\n`);
     }
   }
+  return lines.length > 2 ? lines.join('\n') : null;
+}
 
-  // 7. Skill tool usage instructions (IMPORTANT)
-  // Filter out API-registered skills - they should use curl, not Skill tool
-  const skillToolOnlySkills = enabledSkills.filter(s => !apiRegisteredSkillNames.has(s));
-  if (skillToolOnlySkills.length > 0) {
-    parts.push(`## 技能调用方法（重要）
+/** Build employee dispatch section */
+async function buildEmployeeSection(isIMMode: boolean): Promise<string | null> {
+  if (isIMMode) return null;
+  try {
+    const allEmployees: Array<{ id: string; name: string; description: string; mode: string }> = [];
+    const builtinPath = path.join(process.cwd(), 'builtin-employees.json');
+    if (fsSync.existsSync(builtinPath)) {
+      const data = JSON.parse(await fs.readFile(builtinPath, 'utf-8'));
+      if (data.employees && Array.isArray(data.employees)) allEmployees.push(...data.employees);
+    }
+    const userPath = path.join(process.cwd(), 'data', 'employees', 'user-employees.json');
+    if (fsSync.existsSync(userPath)) {
+      const data = JSON.parse(await fs.readFile(userPath, 'utf-8'));
+      if (data.employees && Array.isArray(data.employees)) {
+        allEmployees.push(...data.employees);
+        console.log(`[SecretaryClaude] Loaded ${data.employees.length} custom employees`);
+      }
+    }
+    if (allEmployees.length === 0) return null;
+
+    const lines: string[] = ['## 可用员工\n', '当用户消息中包含 @员工名 时，通过 Bash 工具调用派发 API：\n'];
+    const port = process.env.PORT || '3000';
+    for (const emp of allEmployees) {
+      if (emp.mode === 'secretary' || emp.mode === 'boss' || emp.mode === 'cli') continue;
+      lines.push(`- **${emp.name}** (ID: ${emp.id})`);
+      lines.push(`  能力: ${emp.description}`);
+      lines.push(`  触发: @${emp.name}`);
+    }
+    lines.push('\n**派发方法**: 使用 POST /api/projects 接口创建项目并自动启动');
+    lines.push('```bash');
+    lines.push(`curl -s -X POST "http://localhost:${port}/api/projects" \\`);
+    lines.push('  -H "Content-Type: application/json" \\');
+    lines.push(`  -d '{"project_id":"p-xxx","name":"任务名称","initialPrompt":"具体任务指令","employee_id":"员工ID","mode":"code","autoStart":true}'`);
+    lines.push('```\n');
+    return lines.join('\n');
+  } catch (err) {
+    console.warn('[SecretaryClaude] Failed to load employees:', err);
+    return null;
+  }
+}
+
+/** Build skill tool usage instructions */
+function buildSkillToolInstructions(skillToolOnlySkills: string[]): string | null {
+  if (skillToolOnlySkills.length === 0) return null;
+  return `## 技能调用方法（重要）
 
 **必须使用 Skill 工具调用技能，禁止手动执行脚本！**
 
@@ -428,11 +336,12 @@ Skill 工具参数:
 - ❌ 不要使用 python3/node 执行技能脚本
 - ❌ 不要使用 \${SKILL_DIR} 变量（未设置）
 - ❌ 不要先探索技能目录结构
-- ✅ 直接使用 Skill 工具调用技能`);
-  }
+- ✅ 直接使用 Skill 工具调用技能`;
+}
 
-  // 8. General capabilities (third-level fallback)
-  parts.push(`## 通用能力
+/** Build general capabilities and safety rules section */
+function buildGeneralCapabilities(workDir: string): string {
+  return `## 通用能力
 
 如果以上接口和技能都不能满足需求，你可以直接使用 Bash/Read/Write/Edit 等工具，
 在工作目录 ${workDir} 下编写脚本或代码来完成任务。
@@ -454,10 +363,55 @@ Skill 工具参数:
 ## 语言要求
 
 - 始终使用中文（简体）回复
-- 保持简洁友好`);
+- 保持简洁友好`;
+}
+
+/**
+ * Build the complete system prompt for secretary with smart routing.
+ * Orchestrates modular sub-functions for each prompt section.
+ */
+export async function buildSecretarySystemPrompt(
+  enabledSkills: string[] = [],
+  workDir: string = SECRETARY_WORK_DIR,
+  isIMMode: boolean = false,
+  message?: string
+): Promise<string> {
+  const parts: string[] = [];
+
+  // 1. Base identity
+  parts.push(`你是秘书助手，请根据用户需求自动选择最佳执行方式。`);
+
+  // 2. SOUL personality
+  const soul = await buildSoulSection();
+  if (soul) parts.push(soul);
+
+  // 3. Memory (BM25 retrieval)
+  const mem = await buildMemorySection(message);
+  if (mem) parts.push(mem);
+
+  // 4. API skill registry (first-level routing)
+  const { section: apiSection, registeredNames: apiRegisteredSkillNames } = await buildApiRegistrySection();
+  if (apiSection) parts.push(apiSection);
+
+  // 5. Skill SKILL.md injection (second-level routing)
+  const skillDesc = await buildSkillDescriptionsSection(enabledSkills, apiRegisteredSkillNames);
+  if (skillDesc) parts.push(skillDesc);
+
+  // 6. Employee dispatch
+  const empSection = await buildEmployeeSection(isIMMode);
+  if (empSection) parts.push(empSection);
+
+  // 7. Skill tool usage instructions
+  const skillToolOnlySkills = enabledSkills.filter(s => !apiRegisteredSkillNames.has(s));
+  const toolInstr = buildSkillToolInstructions(skillToolOnlySkills);
+  if (toolInstr) parts.push(toolInstr);
+
+  // 8. General capabilities (third-level fallback)
+  parts.push(buildGeneralCapabilities(workDir));
 
   return parts.join('\n\n');
 }
+
 
 // ========== Stream State ==========
 
@@ -547,11 +501,6 @@ export async function executeSecretaryClaude(
   const _startTime = Date.now();
   timelineLogger.logSystem('secretary', `AI request started: "${message.slice(0, 80)}"`, 'info', undefined, { messageLength: message.length, skills: enabledSkills.length, sessionId: sessionId || 'new' }).catch(() => {});
 
-  const configuredMaxTokens = Number(process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS);
-  const maxOutputTokens = Number.isFinite(configuredMaxTokens) && configuredMaxTokens > 0
-    ? configuredMaxTokens
-    : 16000;
-
   // stderr buffer for debugging
   const stderrBuffer: string[] = [];
   let fullReply = '';
@@ -568,42 +517,40 @@ export async function executeSecretaryClaude(
   }
 
   try {
-    // Load config and resolve model
-    const customModel = await loadAndApplyClaudeConfig();
-    const finalModel = customModel || normalizeClaudeModelId(null);
+    // Load config and resolve model (Task 7: no process.env mutation)
+    const claudeConfig = await loadClaudeConfig();
+    const finalModel = claudeConfig.customModel || normalizeClaudeModelId(null);
     console.log(`[SecretaryClaude] Model: ${finalModel}`);
 
     // Ensure work directory exists
     await fs.mkdir(workDir, { recursive: true });
 
-    // Build env with builtin node
-    const envWithBuiltinNode = { ...process.env };
+    // Build env with builtin node + API config (no global process.env mutation)
+    const envWithBuiltinNode: Record<string, string | undefined> = { ...process.env };
+    // Inject API config from settings into local env
+    envWithBuiltinNode.ANTHROPIC_BASE_URL = claudeConfig.baseUrl || process.env.ANTHROPIC_BASE_URL || 'https://api.100agent.co';
+    if (claudeConfig.authToken) {
+      envWithBuiltinNode.ANTHROPIC_AUTH_TOKEN = claudeConfig.authToken;
+    }
     const builtinNodeDir = getBuiltinNodeDir();
     if (builtinNodeDir) {
       envWithBuiltinNode.PATH = `${builtinNodeDir}:${process.env.PATH || ''}`;
     }
 
-    // ========== Skill Plugin Loading (only enabled skills) ==========
+    // ========== Skill Plugin Loading (single directory, Task 1) ==========
     const skillsRoot = path.join(process.cwd(), 'skills');
     const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
 
     const plugins: { type: 'local'; path: string }[] = [];
     if (pluginSkills.length > 0) {
-      // Load individual skill directories instead of the entire user-skills root
-      for (const skillName of pluginSkills) {
-        const userSkillDir = path.join(userSkillsRoot, skillName);
-        const builtinSkillDir = path.join(skillsRoot, skillName);
-        // Prefer user-skills version, fallback to builtin
-        const skillDir = fsSync.existsSync(userSkillDir) ? userSkillDir
-          : fsSync.existsSync(builtinSkillDir) ? builtinSkillDir : null;
-        if (skillDir) {
-          plugins.push({ type: 'local', path: skillDir });
-          console.log(`[SecretaryClaude] 🧩 Loaded skill plugin: ${skillName} -> ${skillDir}`);
-        } else {
-          console.warn(`[SecretaryClaude] ⚠️ Skill directory not found: ${skillName}`);
-        }
-      }
-      console.log(`[SecretaryClaude] 🧩 Total plugin skills loaded: ${plugins.length}/${pluginSkills.length}`);
+      // Load USER_SKILLS_DIR_ABSOLUTE as single plugin directory.
+      // SDK discovers skills from .claude-plugin/marketplace.json.
+      // PreToolUse hook enforces enabledSkills whitelist.
+      plugins.push({ type: 'local', path: USER_SKILLS_DIR_ABSOLUTE });
+      console.log(`[SecretaryClaude] 🧩 Loading skill plugins from: ${USER_SKILLS_DIR_ABSOLUTE}`);
+      console.log(`[SecretaryClaude] 🧩 Enabled plugin skills: ${pluginSkills.join(', ')}`);
+    } else {
+      console.log(`[SecretaryClaude] ℹ️ No plugin skills to load`);
     }
 
     // Inject env vars from enabled skills
@@ -626,28 +573,26 @@ export async function executeSecretaryClaude(
     }
     allowedPaths.push(USER_SKILLS_DIR_ABSOLUTE);
 
-    // ========== Hooks ==========
-    const postToolUseHook = async (input: any, toolUseID: string) => {
+    // ========== Hooks (typed, Task 2/4) ==========
+    const postToolUseHook: HookCallback = async (input, toolUseID) => {
       try {
         if (input.hook_event_name !== 'PostToolUse') return {};
-        const toolName = input.tool_name || 'unknown';
-        const toolInput = input.tool_input || {};
-        const toolResponse = input.tool_response || '';
-
-        console.log(`[SecretaryClaude] ✅ PostToolUse: ${toolName} | id=${toolUseID}`);
-
+        const { tool_name: toolName, tool_input: rawInput } = input as Extract<HookInput, { hook_event_name: 'PostToolUse' }>;
+        const toolInput = (rawInput ?? {}) as Record<string, unknown>;
+        const toolResponse = (input as any).tool_response ?? '';
+    
+        console.log(`[SecretaryClaude] \u2705 PostToolUse: ${toolName} | id=${toolUseID}`);
+    
         const action = inferActionFromToolName(toolName);
         const filePath = extractPathFromInput(toolInput);
         toolCallsLog.push({ toolName, filePath, action: action as string });
-
+    
         // Log tool result to timeline
         const responsePreview = typeof toolResponse === 'string'
           ? toolResponse.slice(0, 200)
           : JSON.stringify(toolResponse).slice(0, 200);
         timelineLogger.logSDK('secretary', `${action}: ${toolName}${filePath ? ` -> ${filePath}` : ''}`, 'info', undefined, {
-          toolName,
-          action,
-          filePath,
+          toolName, action, filePath,
           responseLength: typeof toolResponse === 'string' ? toolResponse.length : 0,
           responsePreview,
         }).catch(() => {});
@@ -655,23 +600,15 @@ export async function executeSecretaryClaude(
         const truncatedResponse = typeof toolResponse === 'string' && toolResponse.length > maxLen
           ? toolResponse.slice(0, maxLen) + '\n...(truncated)'
           : (typeof toolResponse === 'string' ? toolResponse : JSON.stringify(toolResponse).slice(0, maxLen));
-
-        // Publish ai_tool_result event (ai_tool_use is sent in PreToolUse hook)
+    
+        // Publish ai_tool_result event
         if (secretaryStream) {
           secretaryStream.publish({
             type: 'ai_tool_result',
-            data: {
-              requestId,
-              toolName,
-              action,
-              filePath,
-              toolResponse: truncatedResponse,
-              toolUseId: toolUseID, // Use SDK-provided ID for matching
-              timestamp: new Date().toISOString(),
-            },
+            data: { requestId, toolName, action, filePath, toolResponse: truncatedResponse, toolUseId: toolUseID, timestamp: new Date().toISOString() },
           });
         }
-
+    
         return {};
       } catch (error) {
         console.warn(`[SecretaryClaude] Error in PostToolUse hook:`, error);
@@ -679,41 +616,28 @@ export async function executeSecretaryClaude(
       }
     };
 
-    const postToolUseFailureHook = async (input: any, toolUseID: string) => {
+    const postToolUseFailureHook: HookCallback = async (input, toolUseID) => {
       try {
         if (input.hook_event_name !== 'PostToolUseFailure') return {};
-        const toolName = input.tool_name || 'unknown';
-        const toolInput = input.tool_input || {};
-        const error = input.error || 'Unknown error';
-
-        console.log(`[SecretaryClaude] ❌ PostToolUseFailure: ${toolName} | id=${toolUseID}`);
-
-        // Log tool failure to timeline
+        const { tool_name: toolName, tool_input: rawInput, error: toolError } = input as Extract<HookInput, { hook_event_name: 'PostToolUseFailure' }>;
+        const toolInput = (rawInput ?? {}) as Record<string, unknown>;
+    
+        console.log(`[SecretaryClaude] \u274c PostToolUseFailure: ${toolName} | id=${toolUseID}`);
+    
         const errAction = inferActionFromToolName(toolName);
         const errFilePath = extractPathFromInput(toolInput);
-        const errMessage = typeof error === 'string' ? error : JSON.stringify(error);
+        const errMessage = typeof toolError === 'string' ? toolError : JSON.stringify(toolError);
         timelineLogger.logError('secretary', `Tool failed: ${errAction} ${toolName}${errFilePath ? ` -> ${errFilePath}` : ''} - ${errMessage.slice(0, 200)}`, undefined, {
-          toolName,
-          action: errAction,
-          filePath: errFilePath,
+          toolName, action: errAction, filePath: errFilePath,
         }).catch(() => {});
-
+    
         if (secretaryStream) {
           secretaryStream.publish({
             type: 'ai_tool_result',
-            data: {
-              requestId,
-              toolName,
-              action: inferActionFromToolName(toolName),
-              filePath: extractPathFromInput(toolInput),
-              toolError: typeof error === 'string' ? error : JSON.stringify(error),
-              isError: true,
-              toolUseId: toolUseID, // Use SDK-provided ID for matching
-              timestamp: new Date().toISOString(),
-            },
+            data: { requestId, toolName, action: errAction, filePath: errFilePath, toolError: errMessage, isError: true, toolUseId: toolUseID, timestamp: new Date().toISOString() },
           });
         }
-
+    
         return {};
       } catch (err) {
         console.warn(`[SecretaryClaude] Error in PostToolUseFailure hook:`, err);
@@ -721,21 +645,24 @@ export async function executeSecretaryClaude(
       }
     };
 
-    // PreToolUse hook: send ai_tool_use event BEFORE tool execution
-    const preToolUseHook = async (input: any, toolUseID: string) => {
+    // PreToolUse hook: enforce skill whitelist + send ai_tool_use event
+    const preToolUseHook: HookCallback = async (input, toolUseID) => {
       try {
         if (input.hook_event_name !== 'PreToolUse') return {};
-        const toolName = input.tool_name || 'unknown';
-        const toolInput = input.tool_input || {};
+        const { tool_name: toolName, tool_input: rawInput } = input as Extract<HookInput, { hook_event_name: 'PreToolUse' }>;
+        const toolInput = (rawInput ?? {}) as Record<string, unknown>;
 
         // === Enforce enabled-skills-only for Skill tool ===
         if (toolName === 'Skill' && enabledSkills.length > 0) {
-          const requestedSkill = toolInput.skill || toolInput.name || '';
+          const requestedSkill = (toolInput.skill || toolInput.name || '') as string;
           if (requestedSkill && !enabledSkills.includes(requestedSkill)) {
-            console.warn(`[SecretaryClaude] 🚫 Blocked disabled skill: "${requestedSkill}" | enabled: [${enabledSkills.join(', ')}]`);
+            console.warn(`[SecretaryClaude] Blocked disabled skill: "${requestedSkill}" | enabled: [${enabledSkills.join(', ')}]`);
             return {
-              decision: 'block',
-              reason: `技能 "${requestedSkill}" 未启用。当前可用技能: ${enabledSkills.join(', ')}。请在秘书设置中启用该技能。`,
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse' as const,
+                permissionDecision: 'deny' as const,
+                permissionDecisionReason: `技能 "${requestedSkill}" 未启用。当前可用技能: ${enabledSkills.join(', ')}。请在秘书设置中启用该技能。`,
+              },
             };
           }
         }
@@ -743,7 +670,7 @@ export async function executeSecretaryClaude(
         const action = inferActionFromToolName(toolName);
         const filePath = extractPathFromInput(toolInput);
 
-        console.log(`[SecretaryClaude] 🔧 PreToolUse: ${toolName} | id=${toolUseID}`);
+        console.log(`[SecretaryClaude] PreToolUse: ${toolName} | id=${toolUseID}`);
 
         // Log tool invocation to timeline
         timelineLogger.logSDK('secretary', `Using tool: ${toolName}${filePath ? ` -> ${filePath}` : ''}`, 'info', undefined, {
@@ -763,7 +690,7 @@ export async function executeSecretaryClaude(
               toolInput,
               action,
               filePath,
-              toolUseId: toolUseID, // Use SDK-provided ID for matching
+              toolUseId: toolUseID,
               timestamp: new Date().toISOString(),
             },
           });
@@ -776,15 +703,39 @@ export async function executeSecretaryClaude(
       }
     };
 
-    const hooks = {
+    // Stop hook: log graceful termination
+    const stopHook: HookCallback = async (input) => {
+      if (input.hook_event_name !== 'Stop') return {};
+      console.log(`[SecretaryClaude] Stop hook triggered | request=${requestId}`);
+      timelineLogger.logSDK('secretary', 'SDK stop hook triggered', 'info', undefined, { requestId }).catch(() => {});
+      return {};
+    };
+
+    // Notification hook: forward SDK notifications to SSE
+    const notificationHook: HookCallback = async (input) => {
+      if (input.hook_event_name !== 'Notification') return {};
+      const { message: notifMessage, title, notification_type } = input as Extract<HookInput, { hook_event_name: 'Notification' }>;
+      console.log(`[SecretaryClaude] Notification: [${notification_type}] ${title ?? ''} - ${notifMessage}`);
+      if (secretaryStream) {
+        secretaryStream.publish({
+          type: 'ai_notification',
+          data: { requestId, title, message: notifMessage, notificationType: notification_type, timestamp: new Date().toISOString() },
+        });
+      }
+      return {};
+    };
+
+    const hooks: Options['hooks'] = {
       PreToolUse: [{ hooks: [preToolUseHook] }],
       PostToolUse: [{ hooks: [postToolUseHook] }],
       PostToolUseFailure: [{ hooks: [postToolUseFailureHook] }],
+      Stop: [{ hooks: [stopHook] }],
+      Notification: [{ hooks: [notificationHook] }],
     };
 
     // ========== Call Claude Agent SDK ==========
     const hasPlugins = plugins.length > 0;
-    console.log(`[SecretaryClaude] 🚀 SDK query() options: { cwd: ${workDir}, plugins: ${hasPlugins ? plugins.length : 'none'}, model: ${finalModel} }`);
+    console.log(`[SecretaryClaude] SDK query() options: { cwd: ${workDir}, plugins: ${hasPlugins ? plugins.length : 'none'}, model: ${finalModel} }`);
 
     const systemPrompt = await buildSecretarySystemPrompt(enabledSkills, workDir, isIMMode, message);
 
@@ -796,30 +747,50 @@ export async function executeSecretaryClaude(
       sessionId: sessionId || 'new',
     }).catch(() => {});
 
+    // AbortController for SDK-native cancellation (Task 3)
+    const sdkAbortController = new AbortController();
+    if (abortSignal) {
+      // Forward external abort signal to SDK abort controller
+      if (abortSignal.aborted) {
+        sdkAbortController.abort();
+      } else {
+        abortSignal.addEventListener('abort', () => sdkAbortController.abort(), { once: true });
+      }
+    }
+
+    const sdkOptions: Options = {
+      cwd: workDir,
+      additionalDirectories: allowedPaths,
+      model: finalModel,
+      resume: sessionId,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      systemPrompt,
+      pathToClaudeCodeExecutable: getClaudeCodeExecutablePath(),
+      env: envWithBuiltinNode,
+      plugins: hasPlugins ? plugins : undefined,
+      allowedTools: hasPlugins ? ['Skill', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] : undefined,
+      settingSources: hasPlugins ? ['project'] : undefined,
+      hooks,
+      // SDK-native abort (Task 3)
+      abortController: sdkAbortController,
+      // Safety/performance options (Task 5)
+      maxTurns: 50,
+      persistSession: !isIMMode,
+      includePartialMessages: true,
+      disallowedTools: ['AskUserQuestion'],
+      stderr: (data: string) => {
+        const line = String(data).trimEnd();
+        if (!line) return;
+        if (stderrBuffer.length > 100) stderrBuffer.shift();
+        stderrBuffer.push(line);
+        console.error(`[SecretaryClaude][stderr] ${line}`);
+      },
+    };
+
     const response = query({
       prompt: message,
-      options: {
-        cwd: workDir,
-        additionalDirectories: allowedPaths,
-        model: finalModel,
-        resume: sessionId,
-        permissionMode: 'bypassPermissions',
-        systemPrompt,
-        maxOutputTokens,
-        pathToClaudeCodeExecutable: getClaudeCodeExecutablePath(),
-        env: envWithBuiltinNode,
-        plugins: hasPlugins ? plugins : undefined,
-        allowedTools: hasPlugins ? ['Skill', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] : undefined,
-        settingSources: hasPlugins ? ['project'] : undefined,
-        hooks,
-        stderr: (data: string) => {
-          const line = String(data).trimEnd();
-          if (!line) return;
-          if (stderrBuffer.length > 100) stderrBuffer.shift();
-          stderrBuffer.push(line);
-          console.error(`[SecretaryClaude][stderr] ${line}`);
-        },
-      } as any,
+      options: sdkOptions,
     });
 
     // Track assistant stream states
@@ -828,12 +799,11 @@ export async function executeSecretaryClaude(
     let hasPublishedContent = false;
     const toolCallsLog: Array<{ toolName: string; filePath?: string; action?: string }> = [];
 
-    // Iterate streaming response
+    // Iterate streaming response (abort handled via sdkAbortController)
     for await (const msg of response) {
-      // Check abort signal
-      if (abortSignal?.aborted) {
+      // Check abort — SDK abortController handles cleanup, just break out
+      if (sdkAbortController.signal.aborted) {
         console.log(`[SecretaryClaude] Aborted by user | request=${requestId}`);
-        try { (response as any).return?.(); } catch {}
         break;
       }
 
@@ -841,8 +811,9 @@ export async function executeSecretaryClaude(
 
       // ─── stream_event: real-time streaming chunks ───
       if (msg.type === 'stream_event') {
-        const event: any = (msg as any).event ?? {};
-        const sessionKey = ((msg as any).session_id ?? (msg as any).uuid ?? 'default').toString();
+        const partialMsg = msg as SDKPartialAssistantMessage;
+        const event: Record<string, unknown> = (partialMsg.event ?? {}) as Record<string, unknown>;
+        const sessionKey = partialMsg.session_id ?? partialMsg.uuid ?? 'default';
 
         let streamState = assistantStreamStates.get(sessionKey);
 
@@ -863,7 +834,7 @@ export async function executeSecretaryClaude(
           }
 
           case 'content_block_delta': {
-            const delta = event.delta;
+            const delta = event.delta as Record<string, unknown> | string | undefined;
             let textChunk = '';
             if (typeof delta === 'string') {
               textChunk = delta;
@@ -942,23 +913,27 @@ export async function executeSecretaryClaude(
       }
 
       // ─── system init: capture session ID ───
-      if (msg.type === 'system' && (msg as any).subtype === 'init') {
-        const initSessionId = (msg as any).session_id;
-        if (initSessionId && typeof initSessionId === 'string') {
-          console.log(`[SecretaryClaude] Session initialized: ${initSessionId}`);
-          newSessionId = initSessionId;
-          timelineLogger.logSystem('secretary', `SDK session initialized: ${initSessionId}`, 'info', undefined, {
-            sessionId: initSessionId,
-            model: finalModel,
-            resumed: !!sessionId,
-          }).catch(() => {});
+      if (msg.type === 'system') {
+        const sysMsg = msg as SDKSystemMessage;
+        if (sysMsg.subtype === 'init') {
+          const initSessionId = sysMsg.session_id;
+          if (initSessionId && typeof initSessionId === 'string') {
+            console.log(`[SecretaryClaude] Session initialized: ${initSessionId}`);
+            newSessionId = initSessionId;
+            timelineLogger.logSystem('secretary', `SDK session initialized: ${initSessionId}`, 'info', undefined, {
+              sessionId: initSessionId,
+              model: finalModel,
+              resumed: !!sessionId,
+            }).catch(() => {});
+          }
         }
         continue;
       }
 
       // ─── assistant: fallback for non-streaming responses ───
       if (msg.type === 'assistant') {
-        const sessionKey = ((msg as any).session_id ?? (msg as any).uuid ?? 'default').toString();
+        const assistantMsg = msg as SDKAssistantMessage;
+        const sessionKey = assistantMsg.session_id ?? assistantMsg.uuid ?? 'default';
 
         // Skip if already handled by stream_event
         if (completedStreamSessions.has(sessionKey)) {
@@ -966,7 +941,7 @@ export async function executeSecretaryClaude(
           continue;
         }
 
-        const assistantMessage = (msg as any).message;
+        const assistantMessage = assistantMsg.message;
         let content = '';
 
         if (typeof assistantMessage?.content === 'string') {
@@ -994,27 +969,28 @@ export async function executeSecretaryClaude(
 
       // ─── result: completion message + stats ───
       if (msg.type === 'result') {
-        const resultMsg = msg as any;
-        const resultSubtype = resultMsg.subtype || 'unknown';
+        const resultMsg = msg as SDKResultMessage;
+        const resultSubtype = resultMsg.subtype;
         console.log(`[SecretaryClaude] Task result: ${resultSubtype}`);
 
-        // Extract conversation stats from SDK result
-        const statsData: Record<string, unknown> = {};
-        if (typeof resultMsg.duration_ms === 'number') statsData.duration_ms = resultMsg.duration_ms;
-        if (typeof resultMsg.duration_api_ms === 'number') statsData.duration_api_ms = resultMsg.duration_api_ms;
-        if (typeof resultMsg.total_cost_usd === 'number') statsData.total_cost_usd = resultMsg.total_cost_usd;
-        // Convert SDK usage from snake_case (input_tokens) to camelCase (inputTokens)
-        if (resultMsg.usage && typeof resultMsg.usage === 'object') {
-          const raw: any = resultMsg.usage;
+        // Extract conversation stats from SDK result (typed)
+        const statsData: Record<string, unknown> = {
+          duration_ms: resultMsg.duration_ms,
+          duration_api_ms: resultMsg.duration_api_ms,
+          total_cost_usd: resultMsg.total_cost_usd,
+          num_turns: resultMsg.num_turns,
+          modelUsage: resultMsg.modelUsage,
+        };
+        // SDK usage already uses snake_case, normalize for frontend
+        if (resultMsg.usage) {
+          const raw = resultMsg.usage;
           statsData.usage = {
-            inputTokens: raw.inputTokens ?? raw.input_tokens ?? 0,
-            outputTokens: raw.outputTokens ?? raw.output_tokens ?? 0,
-            cacheReadInputTokens: raw.cacheReadInputTokens ?? raw.cache_read_input_tokens,
-            cacheCreationInputTokens: raw.cacheCreationInputTokens ?? raw.cache_creation_input_tokens,
+            inputTokens: raw.input_tokens ?? 0,
+            outputTokens: raw.output_tokens ?? 0,
+            cacheReadInputTokens: raw.cache_read_input_tokens,
+            cacheCreationInputTokens: raw.cache_creation_input_tokens,
           };
         }
-        if (resultMsg.modelUsage && typeof resultMsg.modelUsage === 'object') statsData.modelUsage = resultMsg.modelUsage;
-        if (typeof resultMsg.num_turns === 'number') statsData.num_turns = resultMsg.num_turns;
 
         // Publish conversation_stats event for UI display
         if (Object.keys(statsData).length > 0) {
@@ -1044,14 +1020,13 @@ export async function executeSecretaryClaude(
       }
 
       // Capture session ID for context continuity (generic fallback)
-      const msgSessionId = (msg as any).session_id;
-      if (msgSessionId && typeof msgSessionId === 'string') {
-        newSessionId = msgSessionId;
+      if ('session_id' in msg && typeof msg.session_id === 'string') {
+        newSessionId = msg.session_id;
       }
     }
 
     // If no content was published, send empty stream_end
-    if (!hasPublishedContent && !abortSignal?.aborted) {
+    if (!hasPublishedContent && !sdkAbortController.signal.aborted) {
       console.warn(`[SecretaryClaude] No content published, sending empty stream_end`);
       if (secretaryStream) {
         secretaryStream.publish({
@@ -1063,7 +1038,7 @@ export async function executeSecretaryClaude(
           },
         });
       }
-    } else if (hasPublishedContent && !abortSignal?.aborted) {
+    } else if (hasPublishedContent && !sdkAbortController.signal.aborted) {
       // Send final ai_stream_end when content was published
       if (secretaryStream) {
         secretaryStream.publish({
@@ -1077,10 +1052,11 @@ export async function executeSecretaryClaude(
       }
     }
 
-    console.log(`[SecretaryClaude] Completed | request=${requestId}${abortSignal?.aborted ? ' (aborted)' : ''}`);
+    const wasAborted = sdkAbortController.signal.aborted;
+    console.log(`[SecretaryClaude] Completed | request=${requestId}${wasAborted ? ' (aborted)' : ''}`);
 
     const _elapsed = Date.now() - _startTime;
-    timelineLogger.logSDK('secretary', `AI request completed${abortSignal?.aborted ? ' (aborted)' : ''}`, 'info', undefined, {
+    timelineLogger.logSDK('secretary', `AI request completed${wasAborted ? ' (aborted)' : ''}`, 'info', undefined, {
       userMessage: message.slice(0, 500),
       replyLength: fullReply.length,
       replyPreview: fullReply.slice(0, 1000),

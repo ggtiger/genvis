@@ -21,53 +21,14 @@ import { updateGroupSession, getGroup } from './chat-service';
 import { buildSoulPromptBlock } from '@/lib/services/secretary-soul';
 import { getClaudeCodeExecutablePath, getBuiltinNodeDir, USER_SKILLS_DIR_ABSOLUTE } from '@/lib/config/paths';
 import { CLAUDE_DEFAULT_MODEL, normalizeClaudeModelId } from '@/lib/constants/claudeModels';
+import { inferActionFromToolName, extractPathFromInput, type ToolAction } from '@/lib/utils/sdk-tool-helpers';
 
 // ========== Constants ==========
 
 export const AI_SENDER_ID = 'ai-assistant';
 export const AI_SENDER_NAME = '群助理';
 
-// ========== Tool Action Inference (adapted from project chat) ==========
-
-type ToolAction = 'Read' | 'Created' | 'Edited' | 'Deleted' | 'Searched' | 'Executed' | 'Generated';
-
-const TOOL_NAME_ACTION_MAP: Record<string, ToolAction> = {
-  Read: 'Read', read: 'Read', read_file: 'Read', 'read-file': 'Read',
-  Write: 'Created', write: 'Created', write_file: 'Created', 'write-file': 'Created', create_file: 'Created',
-  Edit: 'Edited', edit: 'Edited', edit_file: 'Edited', 'edit-file': 'Edited', update_file: 'Edited', apply_patch: 'Edited', patch_file: 'Edited',
-  remove_file: 'Deleted', delete_file: 'Deleted', delete: 'Deleted', remove: 'Deleted',
-  list_files: 'Searched', list: 'Searched', ls: 'Searched',
-  Glob: 'Searched', glob: 'Searched', glob_files: 'Searched', search_files: 'Searched',
-  Grep: 'Searched', grep: 'Searched',
-  Bash: 'Executed', bash: 'Executed', run: 'Executed', run_bash: 'Executed', shell: 'Executed',
-  Skill: 'Executed', skill: 'Executed',
-  todo_write: 'Generated', todo: 'Generated', plan_write: 'Generated',
-};
-
-function inferActionFromToolName(toolName: string): ToolAction {
-  const normalized = toolName.trim().toLowerCase();
-  if (TOOL_NAME_ACTION_MAP[toolName]) return TOOL_NAME_ACTION_MAP[toolName];
-  if (TOOL_NAME_ACTION_MAP[normalized]) return TOOL_NAME_ACTION_MAP[normalized];
-  const suffix = normalized.split(':').pop() ?? normalized;
-  if (suffix && TOOL_NAME_ACTION_MAP[suffix]) return TOOL_NAME_ACTION_MAP[suffix];
-  // Fallback heuristics
-  if (/read|open|view/i.test(normalized)) return 'Read';
-  if (/write|create|add/i.test(normalized)) return 'Created';
-  if (/edit|modify|update|patch/i.test(normalized)) return 'Edited';
-  if (/delete|remove/i.test(normalized)) return 'Deleted';
-  if (/search|find|list|glob|ls|grep/i.test(normalized)) return 'Searched';
-  if (/execute|exec|run|bash|shell|command/i.test(normalized)) return 'Executed';
-  return 'Executed';
-}
-
-function extractPathFromInput(toolInput: Record<string, unknown>): string | undefined {
-  const keys = ['file_path', 'filePath', 'path', 'target', 'file', 'filename', 'directory', 'dir', 'pattern', 'command'];
-  for (const key of keys) {
-    const val = toolInput[key];
-    if (typeof val === 'string' && val.trim()) return val.trim();
-  }
-  return undefined;
-}
+// Tool action inference imported from '@/lib/utils/sdk-tool-helpers'
 
 const LAN_DEFAULT_SYSTEM_PROMPT = `你是一个局域网群聊中的 群助理。
 你具备完整的工具能力，可以读写文件、执行命令、搜索代码等。

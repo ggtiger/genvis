@@ -1109,6 +1109,20 @@ function registerIpcHandlers() {
     }
   });
 
+  // Show file/folder in system file manager (reveal in Finder/Explorer)
+  ipcMain.handle('show-in-folder', async (event, itemPath) => {
+    if (!itemPath || typeof itemPath !== 'string') {
+      return { success: false, error: 'Invalid path' };
+    }
+    try {
+      shell.showItemInFolder(itemPath);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to show item in folder:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Open file with system default application
   ipcMain.handle('open-file', async (event, filePath) => {
     if (!filePath || typeof filePath !== 'string') {

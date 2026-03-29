@@ -229,6 +229,7 @@ async function sendScheduledMessage(sm: SecretaryScheduledMessage): Promise<void
           senderName: '秘书',
           interactionMode: 'ai_chat',
           requestId,
+          metadata: result.conversationStats ? { conversationStats: result.conversationStats } : undefined,
         });
 
         // Publish the final AI message
