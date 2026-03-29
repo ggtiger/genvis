@@ -12,7 +12,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { GroupMemory, GroupMemoryEntry } from './types';
 
-const DATA_DIR = path.join(process.cwd(), 'data', 'lan-peer', 'groups');
+const DATA_DIR = path.join(process.env.SETTINGS_DIR || path.join(process.cwd(), 'data'), 'lan-peer', 'groups');
 const MAX_ENTRIES = 100;
 
 function memoryFile(groupId: string): string {

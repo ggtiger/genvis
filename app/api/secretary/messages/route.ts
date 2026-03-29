@@ -134,6 +134,17 @@ export async function POST(request: NextRequest) {
 
     // 4. If AI reply is requested, trigger asynchronously
     if (interactionMode !== 'no_ai') {
+      // Concurrency guard: only one AI task at a time
+      if (secretaryStream.isStreaming()) {
+        return NextResponse.json({
+          success: true,
+          message: userMessage,
+          requestId,
+          busy: true,
+          busyMessage: '有任务正在执行中，请稍后再发送',
+        });
+      }
+
       handleAIReply(content.trim(), requestId, enabledSkills || []).catch((err) => {
         console.error('[Secretary API] AI reply failed:', err);
       });

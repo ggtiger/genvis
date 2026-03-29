@@ -63,6 +63,22 @@ export class SecretaryStreamManager {
       this.bufferedEvents = [];
     }
 
+    // 检测是否有活跃的 AI 流 —— 页面刷新后恢复执行状态
+    // ai_stream_start 已经被旧连接消费过，buffer 中没有，需要重新推送
+    if (this.activeStreams.size > 0) {
+      for (const [reqId, info] of this.activeStreams) {
+        try {
+          const resumeEvent: SecretaryEvent = {
+            type: 'ai_stream_start',
+            data: { requestId: reqId, resumed: true, startedAt: info.startedAt },
+          };
+          const message = `data: ${JSON.stringify(resumeEvent)}\n\n`;
+          controller.enqueue(new TextEncoder().encode(message));
+          console.log(`[SecretaryStream] 推送 resumed ai_stream_start 给新连接 | requestId=${reqId}`);
+        } catch { /* ignore */ }
+      }
+    }
+
     return id;
   }
 

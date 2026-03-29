@@ -11,7 +11,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { ChatGroup, ChatMessage } from './types';
 
-const DATA_DIR = path.join(process.cwd(), 'data', 'lan-peer', 'groups');
+const DATA_DIR = path.join(process.env.SETTINGS_DIR || path.join(process.cwd(), 'data'), 'lan-peer', 'groups');
 const HISTORY_SYNC_LIMIT = 50;
 
 async function ensureDir(dir: string): Promise<void> {

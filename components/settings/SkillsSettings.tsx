@@ -389,6 +389,7 @@ export default function SkillsSettings() {
         {activeTab === 'market' ? (
           <SkillMarketPanel
             installedSkillNames={skills.map(s => s.name)}
+            installedSkills={skills}
             onSkillInstalled={loadSkills}
           />
         ) : (

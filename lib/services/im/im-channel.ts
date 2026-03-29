@@ -343,6 +343,27 @@ export async function processIMMessage(
     console.log(`[IMChannel] 消息已保存到数据库: ${userMsg.id}`);
 
     // 4.2 触发 AI 流式执行（异步，不阻塞 IM 响应）
+    // Concurrency guard: only one AI task at a time
+    if (secretaryStream.isStreaming()) {
+      console.log(`[IMChannel] AI task busy, skipping AI reply for IM message | request=${requestId}`);
+      // Save a system hint message so the user sees it in the chat panel too
+      const busyMsg = await createSecretaryMessage({
+        role: 'assistant',
+        messageType: 'text',
+        content: '有任务正在执行中，请稍后再发送',
+        senderId: SECRETARY_SENDER_ID,
+        senderName: SECRETARY_SENDER_NAME,
+        interactionMode: 'ai_chat',
+        requestId,
+      });
+      secretaryStream.publish({ type: 'new_message', data: { message: busyMsg } });
+      // Reply to the IM user
+      await adapter.sendReply(
+        { ...replyBase(message), content: '有任务正在执行中，请稍后再发送' },
+        config
+      );
+      aiReplyTriggered = true;
+    } else {
     // Note: AI processing runs in background; if it fails, it will send error notification
     handleIMSecretaryAIReply(message.content, requestId, adapter, config, message).catch((err: Error) => {
       console.error('[IMChannel] AI reply failed:', err);
@@ -353,6 +374,7 @@ export async function processIMMessage(
       ).catch(sendErr => console.error('[IMChannel] Failed to send AI error notification:', sendErr));
     });
     aiReplyTriggered = true;
+    }
 
     // 5. 更新 IM session
     session.messages.push({ role: 'user', content: message.content, timestamp });

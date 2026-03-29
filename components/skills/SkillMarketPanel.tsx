@@ -4,15 +4,17 @@ import { useState, useEffect, useCallback } from 'react';
 import { Search, Download, Check, AlertCircle, RefreshCw, ExternalLink, Terminal } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import type { MarketSkill } from '@/lib/services/skill-market';
+import type { SkillMeta } from '@/lib/services/skill-service';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '';
 
 interface SkillMarketPanelProps {
   installedSkillNames: string[];
+  installedSkills?: SkillMeta[];
   onSkillInstalled?: () => void;
 }
 
-export default function SkillMarketPanel({ installedSkillNames, onSkillInstalled }: SkillMarketPanelProps) {
+export default function SkillMarketPanel({ installedSkillNames, installedSkills, onSkillInstalled }: SkillMarketPanelProps) {
   const toast = useToast();
   const [skills, setSkills] = useState<MarketSkill[]>([]);
   const [loading, setLoading] = useState(false);
@@ -43,10 +45,26 @@ export default function SkillMarketPanel({ installedSkillNames, onSkillInstalled
       const data = await response.json();
 
       if (data.success) {
-        const newSkills = data.data.skills.map((s: MarketSkill) => ({
-          ...s,
-          installed: installedSkillNames.includes(s.name)
-        }));
+        const newSkills = data.data.skills.map((s: MarketSkill) => {
+          const isInstalled = installedSkillNames.includes(s.name);
+          // Merge local SkillMeta for installed skills to enrich display
+          if (isInstalled && installedSkills) {
+            const local = installedSkills.find(ls => ls.name === s.name);
+            if (local) {
+              return {
+                ...s,
+                installed: true,
+                displayName: s.displayName || local.displayName || s.name,
+                description: s.description || local.description || '',
+                author: s.author || local.author,
+                version: s.version || local.version,
+                category: s.category || local.category,
+                tags: s.tags || local.tags,
+              };
+            }
+          }
+          return { ...s, installed: isInstalled };
+        });
 
         if (resetPage || currentPage === 1) {
           setSkills(newSkills);
@@ -274,24 +292,37 @@ export default function SkillMarketPanel({ installedSkillNames, onSkillInstalled
                     <h4 className="font-medium text-gray-900 dark:text-white truncate">
                       {skill.displayName || skill.name}
                     </h4>
+                    {skill.version && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-300 font-mono">
+                        v{skill.version}
+                      </span>
+                    )}
                     {skill.installed && (
                       <span className="text-xs px-2 py-0.5 rounded bg-green-50 dark:bg-green-500/20 text-green-600 dark:text-green-400">
                         Installed
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
+                  <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 mb-2">
                     {skill.description || 'No description available'}
                   </p>
-                  <div className="flex items-center gap-3 mt-2 text-xs text-gray-400 dark:text-gray-500">
+                  <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
                     {skill.author && (
-                      <span>Author: {skill.author}</span>
-                    )}
-                    {skill.version && (
-                      <span>v{skill.version}</span>
+                      <span className="flex items-center gap-1">
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/></svg>
+                        {skill.author}
+                      </span>
                     )}
                     {skill.downloads !== undefined && (
-                      <span>{skill.downloads.toLocaleString()} downloads</span>
+                      <span className="flex items-center gap-1">
+                        <Download className="w-3 h-3" />
+                        {skill.downloads.toLocaleString()}
+                      </span>
+                    )}
+                    {skill.category && (
+                      <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                        {skill.category}
+                      </span>
                     )}
                   </div>
                 </div>

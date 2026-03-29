@@ -180,12 +180,22 @@ async function sendScheduledMessage(sm: SecretaryScheduledMessage): Promise<void
 
   if (sm.aiReply) {
     // Use the new Claude Agent SDK for AI processing
+    const { randomUUID } = await import('crypto');
+
+    // Concurrency guard: skip if another AI task is already running
+    if (secretaryStream.isStreaming()) {
+      console.log(`[SecretaryScheduler] Skipping "${sm.content.slice(0, 50)}" — another AI task is active`);
+      return;
+    }
+
+    const requestId = randomUUID();
+    // Mark stream active for concurrency tracking
+    const abortController = secretaryStream.markStreamActive(requestId);
+
     try {
       const { executeSecretaryClaude } = await import('./secretary/secretary-claude');
       const { createSecretaryMessage } = await import('./secretary/secretary-message-service');
-      const { randomUUID } = await import('crypto');
 
-      const requestId = randomUUID();
       const messageContent = `[定时任务] ${sm.content}`;
 
       // Create and persist user message
@@ -216,6 +226,7 @@ async function sendScheduledMessage(sm: SecretaryScheduledMessage): Promise<void
         message: messageContent,
         enabledSkills: [],
         requestId,
+        abortSignal: abortController.signal,
       });
 
       // If we have a reply, persist to database
@@ -239,16 +250,17 @@ async function sendScheduledMessage(sm: SecretaryScheduledMessage): Promise<void
         });
       }
 
-      // Always send ai_stream_end
-      secretaryStream.publish({
-        type: 'ai_stream_end',
-        data: { requestId, timestamp: new Date().toISOString() },
-      });
-
       console.log(`[SecretaryScheduler] AI message processed via Agent SDK: ${sm.content.slice(0, 50)}`);
     } catch (err) {
       console.error('[SecretaryScheduler] AI send failed:', err);
       await appendDirectly(sm.content, '定时消息已触发，AI处理失败，请稍后重试。');
+    } finally {
+      // Always send ai_stream_end and clean up
+      secretaryStream.publish({
+        type: 'ai_stream_end',
+        data: { requestId, timestamp: new Date().toISOString() },
+      });
+      secretaryStream.markStreamDone(requestId);
     }
   } else {
     // No AI: just append to session

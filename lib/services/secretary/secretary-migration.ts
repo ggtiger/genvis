@@ -11,7 +11,7 @@ import { createSecretaryMessage, getSecretaryMessageCount } from './secretary-me
 
 // ========== Constants ==========
 
-const DATA_DIR = join(process.cwd(), 'data');
+const DATA_DIR = process.env.SETTINGS_DIR || join(process.cwd(), 'data');
 const OLD_SESSION_FILE = join(DATA_DIR, 'secretary-session.json');
 const LOG_PREFIX = '[Secretary Migration]';
 

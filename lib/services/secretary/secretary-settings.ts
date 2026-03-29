@@ -20,7 +20,7 @@ export interface SecretarySettings {
 
 // ========== Paths ==========
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.SETTINGS_DIR || path.join(process.cwd(), 'data');
 const SETTINGS_FILE = path.join(DATA_DIR, 'secretary-settings.json');
 
 // ========== Default Values ==========

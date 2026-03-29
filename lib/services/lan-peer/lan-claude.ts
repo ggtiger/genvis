@@ -28,6 +28,24 @@ import { inferActionFromToolName, extractPathFromInput, type ToolAction } from '
 export const AI_SENDER_ID = 'ai-assistant';
 export const AI_SENDER_NAME = '群助理';
 
+// ========== Environment-aware path helpers ==========
+
+function getDataDir(): string {
+  return process.env.SETTINGS_DIR || path.join(process.cwd(), 'data');
+}
+
+function getUserSkillsDir(): string {
+  return process.env.USER_SKILLS_DIR || path.join(process.cwd(), 'data', 'user-skills');
+}
+
+function getBuiltinSkillsDir(): string {
+  const resourcesPath = process.env.GENVIS_RESOURCES_PATH || (process as any).resourcesPath;
+  if (resourcesPath && fsSync.existsSync(path.join(resourcesPath, 'skills'))) {
+    return path.join(resourcesPath, 'skills');
+  }
+  return path.join(process.cwd(), 'skills');
+}
+
 // Tool action inference imported from '@/lib/utils/sdk-tool-helpers'
 
 const LAN_DEFAULT_SYSTEM_PROMPT = `你是一个局域网群聊中的 群助理。
@@ -67,8 +85,8 @@ async function buildLanSystemPrompt(groupId: string): Promise<string> {
   // This is critical — without this, AI only knows skill names but not their actual content/methods
   const enabledSkills = group?.enabledSkills || [];
   if (enabledSkills.length > 0) {
-    const skillsRoot = path.join(process.cwd(), 'skills');
-    const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
+    const skillsRoot = getBuiltinSkillsDir();
+    const userSkillsRoot = getUserSkillsDir();
 
     for (const skillName of enabledSkills) {
       // Priority: user-skills > builtin skills (same as skill-service)
@@ -144,7 +162,7 @@ async function buildLanSystemPrompt(groupId: string): Promise<string> {
   return parts.join('\n\n');
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data', 'lan-peer', 'groups');
+const DATA_DIR = path.join(getDataDir(), 'lan-peer', 'groups');
 
 function groupWorkspace(groupId: string): string {
   return path.join(DATA_DIR, groupId, 'workspace');
@@ -240,8 +258,8 @@ export async function executeLanClaude(params: ExecuteLanClaudeParams): Promise<
     // ========== Skill Plugin Loading ==========
     const group = await getGroup(groupId);
     const enabledSkills = group?.enabledSkills || [];
-    const skillsRoot = path.join(process.cwd(), 'skills');
-    const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
+    const skillsRoot = getBuiltinSkillsDir();
+    const userSkillsRoot = getUserSkillsDir();
 
     // Use the same plugin loading approach as project chat:
     // Pass USER_SKILLS_DIR_ABSOLUTE (parent dir containing .claude-plugin/plugin.json)

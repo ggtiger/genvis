@@ -1697,6 +1697,7 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
         if (data.type === 'ai_stream_start') {
           setConversationStats(null);
           setCurrentRequestId(data.data?.requestId || null);
+          setSending(true); // Keep sending true during AI execution
           // Clear old tool summary for new request
           setMessages((prev) => prev.filter((m) => m.id !== TOOL_SUMMARY_ID));
           if (data.data?.resumed) loadMessages();
@@ -1725,6 +1726,7 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
           setStreamingMessage(null);
           setCurrentRequestId(null);
           setAborting(false);
+          setSending(false); // AI execution finished, allow new messages
           const endRequestId = data.data?.requestId;
           const persistSuccess = data.data?.persistSuccess !== false; // default to true for backward compat
 
@@ -2118,6 +2120,13 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
     const content = inputValue.trim();
     if ((!content && attachments.length === 0) || sending) return;
     if (attachments.some((a) => a.uploading)) return; // wait for uploads
+
+    // Concurrency guard: if AI is currently streaming, reject
+    if (streamingMessage) {
+      toast.warning('有任务正在执行中，请稍后发送', 3000);
+      return;
+    }
+
     setMention({ active: false, startIndex: 0, query: '' });
 
     // Detect @employeeName + instruction pattern for auto-dispatch
@@ -2165,13 +2174,22 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
       });
       const result = await res.json();
       if (result.success && result.message) {
+        // Check if backend rejected due to busy
+        if (result.busy) {
+          toast.warning(result.busyMessage || '有任务正在执行中，请稍后发送', 3000);
+          setSending(false);
+          return;
+        }
         setMessages((prev) => {
           if (prev.some((m) => m.id === result.message.id)) return prev;
           return [...prev, result.message];
         });
       }
-    } catch { /* ignore */ }
-    setSending(false);
+    } catch {
+      // Network error: restore sending state since no AI stream will arrive
+      setSending(false);
+    }
+    // Don't setSending(false) on success — it will be set to false when ai_stream_end arrives
     textareaRef.current?.focus();
   };
 

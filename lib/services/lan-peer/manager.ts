@@ -331,7 +331,7 @@ export class LanPeerManager {
 
 // ========== Stable Peer ID (persisted to disk) ==========
 
-const PEER_ID_FILE = path.join(process.cwd(), 'data', 'lan-peer', 'peer-id.txt');
+const PEER_ID_FILE = path.join(process.env.SETTINGS_DIR || path.join(process.cwd(), 'data'), 'lan-peer', 'peer-id.txt');
 
 /**
  * Get the base machine peerId (without port suffix).
@@ -355,7 +355,7 @@ async function getBasePeerId(): Promise<string> {
   }
 
   // First run: scan existing groups to adopt a creatorId for backward compatibility
-  const groupsDir = path.join(process.cwd(), 'data', 'lan-peer', 'groups');
+  const groupsDir = path.join(process.env.SETTINGS_DIR || path.join(process.cwd(), 'data'), 'lan-peer', 'groups');
   let adoptedId: string | null = null;
   const oldCreatorIds = new Set<string>();
 
@@ -406,7 +406,7 @@ export async function getStablePeerId(): Promise<string> {
   g[cacheKey] = instanceId;
 
   // Migrate: update groups whose creatorId matches the base ID (without port suffix)
-  const groupsDir = path.join(process.cwd(), 'data', 'lan-peer', 'groups');
+  const groupsDir = path.join(process.env.SETTINGS_DIR || path.join(process.cwd(), 'data'), 'lan-peer', 'groups');
   try {
     const entries = await fs.readdir(groupsDir);
     for (const entry of entries) {

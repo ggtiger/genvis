@@ -42,8 +42,34 @@ import { inferActionFromToolName, extractPathFromInput, type ToolAction } from '
 export const SECRETARY_SENDER_ID = 'secretary-ai';
 export const SECRETARY_SENDER_NAME = '秘书';
 
+// ========== Environment-aware path helpers (packaged Electron uses env vars) ==========
+
+/** Writable data dir: SETTINGS_DIR (set by Electron main) or fallback to cwd/data */
+function getDataDir(): string {
+  return process.env.SETTINGS_DIR || path.join(process.cwd(), 'data');
+}
+
+/** User skills dir: USER_SKILLS_DIR (set by Electron main) or fallback */
+function getUserSkillsDir(): string {
+  return process.env.USER_SKILLS_DIR || path.join(process.cwd(), 'data', 'user-skills');
+}
+
+/** User employees dir: USER_EMPLOYEES_DIR (set by Electron main) or fallback */
+function getUserEmployeesDir(): string {
+  return process.env.USER_EMPLOYEES_DIR || path.join(process.cwd(), 'data', 'employees');
+}
+
+/** Builtin skills dir - stays in app resources, not user data */
+function getBuiltinSkillsDir(): string {
+  const resourcesPath = process.env.GENVIS_RESOURCES_PATH || (process as any).resourcesPath;
+  if (resourcesPath && fsSync.existsSync(path.join(resourcesPath, 'skills'))) {
+    return path.join(resourcesPath, 'skills');
+  }
+  return path.join(process.cwd(), 'skills');
+}
+
 // Default work directory for secretary file operations
-const SECRETARY_WORK_DIR = path.join(process.cwd(), 'data', 'secretary-uploads');
+const SECRETARY_WORK_DIR = path.join(getDataDir(), 'secretary-uploads');
 
 // Tool action inference imported from '@/lib/utils/sdk-tool-helpers'
 
@@ -132,7 +158,7 @@ async function buildMemorySection(message?: string): Promise<string | null> {
 async function buildApiRegistrySection(): Promise<{ section: string | null; registeredNames: Set<string> }> {
   const registeredNames = new Set<string>();
   try {
-    const registryPath = path.join(process.cwd(), 'data', 'api-skill-registry.json');
+    const registryPath = path.join(getDataDir(), 'api-skill-registry.json');
     if (!fsSync.existsSync(registryPath)) return { section: null, registeredNames };
     const registryContent = await fs.readFile(registryPath, 'utf-8');
     const registry = JSON.parse(registryContent);
@@ -143,7 +169,7 @@ async function buildApiRegistrySection(): Promise<{ section: string | null; regi
     // Deployed skill ports
     let deployedSkillPorts: Record<string, number> = {};
     try {
-      const pluginExPath = path.join(process.cwd(), 'data', 'user-skills', '.claude-plugin', 'plugin-ex.json');
+      const pluginExPath = path.join(getUserSkillsDir(), '.claude-plugin', 'plugin-ex.json');
       if (fsSync.existsSync(pluginExPath)) {
         const pluginExContent = await fs.readFile(pluginExPath, 'utf-8');
         const pluginEx = JSON.parse(pluginExContent);
@@ -163,7 +189,7 @@ async function buildApiRegistrySection(): Promise<{ section: string | null; regi
 
     // Relative URL skills
     const relativeUrlSkills = new Set<string>();
-    for (const skillDir of [path.join(process.cwd(), 'skills'), path.join(process.cwd(), 'data', 'user-skills')]) {
+    for (const skillDir of [getBuiltinSkillsDir(), getUserSkillsDir()]) {
       try {
         const entries = await fs.readdir(skillDir);
         for (const entry of entries) {
@@ -228,8 +254,8 @@ async function buildSkillDescriptionsSection(
   apiRegisteredSkillNames: Set<string>
 ): Promise<string | null> {
   if (enabledSkills.length === 0) return null;
-  const skillsRoot = path.join(process.cwd(), 'skills');
-  const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
+  const skillsRoot = getBuiltinSkillsDir();
+  const userSkillsRoot = getUserSkillsDir();
   const lines: string[] = ['## 可用技能插件\n', '**重要：使用 Skill 工具调用技能，不要手动执行脚本！**\n'];
 
   for (const skillName of enabledSkills) {
@@ -277,7 +303,7 @@ async function buildEmployeeSection(isIMMode: boolean): Promise<string | null> {
       const data = JSON.parse(await fs.readFile(builtinPath, 'utf-8'));
       if (data.employees && Array.isArray(data.employees)) allEmployees.push(...data.employees);
     }
-    const userPath = path.join(process.cwd(), 'data', 'employees', 'user-employees.json');
+    const userPath = path.join(getUserEmployeesDir(), 'user-employees.json');
     if (fsSync.existsSync(userPath)) {
       const data = JSON.parse(await fs.readFile(userPath, 'utf-8'));
       if (data.employees && Array.isArray(data.employees)) {
@@ -479,7 +505,7 @@ export async function executeSecretaryClaude(
   // API skills (like productivity-hub) use curl, not Skill tool
   let pluginSkills = [...enabledSkills];
   try {
-    const registryPath = path.join(process.cwd(), 'data', 'api-skill-registry.json');
+    const registryPath = path.join(getDataDir(), 'api-skill-registry.json');
     if (fsSync.existsSync(registryPath)) {
       const registryContent = await fs.readFile(registryPath, 'utf-8');
       const registry = JSON.parse(registryContent);
@@ -538,8 +564,8 @@ export async function executeSecretaryClaude(
     }
 
     // ========== Skill Plugin Loading (single directory, Task 1) ==========
-    const skillsRoot = path.join(process.cwd(), 'skills');
-    const userSkillsRoot = path.join(process.cwd(), 'data', 'user-skills');
+    const skillsRoot = getBuiltinSkillsDir();
+    const userSkillsRoot = getUserSkillsDir();
 
     const plugins: { type: 'local'; path: string }[] = [];
     if (pluginSkills.length > 0) {

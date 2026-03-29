@@ -24,7 +24,7 @@ function generateClientId(): string {
 }
 
 /** syncBuf 持久化文件目录 */
-const SYNC_BUF_DIR = path.join(process.cwd(), 'data', 'im-sessions', 'wechat_personal');
+const SYNC_BUF_DIR = path.join(process.env.SETTINGS_DIR || path.join(process.cwd(), 'data'), 'im-sessions', 'wechat_personal');
 const SYNC_BUF_FILE = path.join(SYNC_BUF_DIR, '_sync_buf.json');
 
 /** 连续失败 backoff 阈值 */

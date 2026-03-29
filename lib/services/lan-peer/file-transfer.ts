@@ -11,7 +11,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import type { FileTransferInfo } from './types';
 
-const RECEIVE_DIR = path.join(process.cwd(), 'data', 'lan-peer', 'files');
+const RECEIVE_DIR = path.join(process.env.SETTINGS_DIR || path.join(process.cwd(), 'data'), 'lan-peer', 'files');
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
 async function ensureReceiveDir(): Promise<void> {
