@@ -1,0 +1,141 @@
+{
+  "skillName": "secretary",
+  "displayName": "秘书助手",
+  "description": "管理员工、派发任务、查看工作状态、回复等待确认的员工。当用户想要派发任务给员工、查看正在工作的员工、或回复员工时使用此技能。",
+  "baseUrl": "",
+  "useRelativeUrl": true,
+  "endpoints": [
+    {
+      "path": "/api/employees",
+      "method": "GET",
+      "name": "list_employees",
+      "description": "获取所有可用员工列表",
+      "parameters": []
+    },
+    {
+      "path": "/api/employees/stats",
+      "method": "GET",
+      "name": "get_employee_stats",
+      "description": "获取员工任务数和 token 用量统计",
+      "parameters": []
+    },
+    {
+      "path": "/api/projects",
+      "method": "POST",
+      "name": "dispatch_task",
+      "description": "派发任务给员工。创建项目并启动任务，设置 autoStart=true 立即执行。",
+      "parameters": [
+        {"name": "project_id", "type": "string", "required": true, "description": "唯一项目ID，格式 p-xxx"},
+        {"name": "name", "type": "string", "required": true, "description": "任务名称"},
+        {"name": "initialPrompt", "type": "string", "required": false, "description": "任务详细指令"},
+        {"name": "employee_id", "type": "string", "required": false, "description": "员工ID（从 list_employees 获取）"},
+        {"name": "mode", "type": "string", "required": false, "description": "模式: code(代码项目) 或 work(通用任务)"},
+        {"name": "projectType", "type": "string", "required": false, "description": "项目类型: nextjs, python-fastapi, default"},
+        {"name": "preferredCli", "type": "string", "required": false, "description": "CLI偏好: claude, codex, cursor, qwen, glm"},
+        {"name": "autoStart", "type": "boolean", "required": false, "description": "是否立即启动，默认 false"}
+      ]
+    },
+    {
+      "path": "/api/projects",
+      "method": "GET",
+      "name": "list_projects",
+      "description": "获取所有项目列表，查看哪些员工正在工作（status=running）",
+      "parameters": [
+        {"name": "page", "type": "number", "required": false, "description": "页码"},
+        {"name": "pageSize", "type": "number", "required": false, "description": "每页数量"}
+      ]
+    },
+    {
+      "path": "/api/projects/recent",
+      "method": "GET",
+      "name": "get_recent_projects",
+      "description": "获取最近5个活跃项目",
+      "parameters": []
+    },
+    {
+      "path": "/api/chat/home/reply-to-project",
+      "method": "POST",
+      "name": "reply_to_employee",
+      "description": "回复等待确认的员工（项目状态为 waiting_feedback 时使用）",
+      "parameters": [
+        {"name": "projectId", "type": "string", "required": true, "description": "项目ID"},
+        {"name": "message", "type": "string", "required": true, "description": "回复内容"}
+      ]
+    },
+    {
+      "path": "/api/chat/home/reply-to-project",
+      "method": "GET",
+      "name": "get_feedback_question",
+      "description": "获取员工等待确认的问题内容",
+      "parameters": [
+        {"name": "projectId", "type": "string", "required": true, "description": "项目ID"}
+      ]
+    },
+    {
+      "path": "/api/secretary/messages",
+      "method": "GET",
+      "name": "list_messages",
+      "description": "获取秘书对话历史",
+      "parameters": [
+        {"name": "limit", "type": "number", "required": false, "description": "返回消息数量，默认50"},
+        {"name": "before", "type": "string", "required": false, "description": "分页：获取此ID之前的消息"}
+      ]
+    },
+    {
+      "path": "/api/secretary/messages",
+      "method": "DELETE",
+      "name": "clear_messages",
+      "description": "清空秘书对话历史",
+      "parameters": []
+    },
+    {
+      "path": "/api/secretary/skills",
+      "method": "GET",
+      "name": "list_skills",
+      "description": "获取秘书可用技能列表",
+      "parameters": []
+    },
+    {
+      "path": "/api/secretary/skills",
+      "method": "PUT",
+      "name": "update_skills",
+      "description": "更新秘书启用的技能",
+      "parameters": [
+        {"name": "enabledSkills", "type": "array", "required": true, "description": "要启用的技能名称数组"}
+      ]
+    },
+    {
+      "path": "/api/secretary/optimize",
+      "method": "POST",
+      "name": "optimize_input",
+      "description": "优化用户输入，使其更清晰易懂",
+      "parameters": [
+        {"name": "content", "type": "string", "required": true, "description": "原始用户输入"}
+      ]
+    },
+    {
+      "path": "/api/secretary/abort",
+      "method": "POST",
+      "name": "abort_response",
+      "description": "终止正在进行的AI响应",
+      "parameters": [
+        {"name": "requestId", "type": "string", "required": false, "description": "要终止的请求ID，不传则终止全部"}
+      ]
+    },
+    {
+      "path": "/api/projects/send-message",
+      "method": "POST",
+      "name": "send_message_to_project",
+      "description": "通过秘书发送消息给指定项目，如果项目正在执行会返回忙碌状态。效果与秘书派发任务类似。",
+      "parameters": [
+        {"name": "projectId", "type": "string", "required": true, "description": "目标项目ID"},
+        {"name": "message", "type": "string", "required": true, "description": "要发送的消息内容"},
+        {"name": "cliPreference", "type": "string", "required": false, "description": "CLI偏好: claude, codex, cursor, qwen, glm"},
+        {"name": "selectedModel", "type": "string", "required": false, "description": "指定使用的模型"}
+      ]
+    }
+  ],
+  "auth": {
+    "authType": "none"
+  }
+}
