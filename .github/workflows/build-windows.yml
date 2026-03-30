@@ -147,6 +147,20 @@ jobs:
           Write-Host "Parse OK - No syntax errors found" -ForegroundColor Green
 
       # 6. 执行 Windows 打包脚本
+      - name: Build/Check SkillHub CLI
+        shell: pwsh
+        run: .\scripts\build-skillhub-cli.ps1
+
+      - name: Verify SkillHub CLI
+        shell: pwsh
+        run: |
+          $skillhubExe = "skillhub-cli\win32-x64\bin\skillhub.exe"
+          if (Test-Path $skillhubExe) {
+            Write-Host "SkillHub CLI OK: $skillhubExe" -ForegroundColor Green
+          } else {
+            Write-Host "SkillHub CLI not found (optional, continuing)" -ForegroundColor Yellow
+          }
+
       - name: Build Windows package
         shell: pwsh
         run: .\tools\build-windows.ps1 -SkipTypeCheck

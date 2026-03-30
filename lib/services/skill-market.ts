@@ -12,6 +12,8 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
+import path from 'path';
+import { USER_SKILLS_DIR_ABSOLUTE } from '@/lib/config/paths';
 
 const execAsync = promisify(exec);
 
@@ -60,6 +62,48 @@ let _resolvedSkillHubPath: string | null = null;
 
 /** Home directory (works on all platforms) */
 const HOME_DIR = process.env.HOME || process.env.USERPROFILE || '';
+
+/**
+ * Get the path to the builtin skillhub CLI bundled with the Electron app.
+ * Set by electron/main.js via SKILLHUB_BUILTIN_PATH env var,
+ * or detected from process.resourcesPath.
+ */
+function getBuiltinSkillHubPath(): string | null {
+  // Priority 1: env var set by electron/main.js
+  if (process.env.SKILLHUB_BUILTIN_PATH) {
+    try {
+      fs.accessSync(process.env.SKILLHUB_BUILTIN_PATH, IS_WIN ? fs.constants.F_OK : fs.constants.X_OK);
+      return process.env.SKILLHUB_BUILTIN_PATH;
+    } catch {
+      // not available
+    }
+  }
+
+  // Priority 2: detect from resourcesPath (Electron production)
+  try {
+    // @ts-ignore - process.resourcesPath is Electron-specific
+    const resourcesPath = process.resourcesPath;
+    if (resourcesPath) {
+      let builtinPath: string;
+      if (IS_WIN) {
+        builtinPath = path.join(resourcesPath, 'skillhub-cli', 'win32-x64', 'bin', 'skillhub.cmd');
+      } else {
+        const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+        builtinPath = path.join(resourcesPath, 'skillhub-cli', `darwin-${arch}`, 'bin', 'skillhub');
+      }
+      try {
+        fs.accessSync(builtinPath, IS_WIN ? fs.constants.F_OK : fs.constants.X_OK);
+        return builtinPath;
+      } catch {
+        // not bundled
+      }
+    }
+  } catch {
+    // not in Electron context
+  }
+
+  return null;
+}
 
 /** Common installation paths for skillhub CLI (platform-aware) */
 function getCommonPaths(): string[] {
@@ -138,6 +182,13 @@ export async function isSkillHubAvailable(): Promise<boolean> {
     }
   }
 
+  // Priority check: builtin CLI bundled with the Electron app
+  const builtinPath = getBuiltinSkillHubPath();
+  if (builtinPath) {
+    _resolvedSkillHubPath = builtinPath;
+    return true;
+  }
+
   // Try `which` (Unix) or `where` (Windows) with extended PATH
   const whichCmd = IS_WIN ? `where ${SKILLHUB_BIN}` : `which ${SKILLHUB_BIN}`;
   try {
@@ -188,11 +239,31 @@ export async function installSkillHubCLI(
   onProgress?.('download', 'Downloading SkillHub CLI installer...');
 
   // Platform-specific install command
+  // Both platforms use the tar.gz archive (the .ps1 installer URL is broken on COS)
+  const tarURL = 'https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/latest.tar.gz';
   let installCmd: string;
   if (IS_WIN) {
-    // Windows: use PowerShell to download and run installer
-    const installScriptUrl = 'https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/install.ps1';
-    installCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "& { Invoke-WebRequest -Uri '${installScriptUrl}' -OutFile '$env:TEMP\\install-skillhub.ps1'; & '$env:TEMP\\install-skillhub.ps1' --cli-only }"`;
+    // Windows: download tar.gz, extract, find and run installer or copy binary directly
+    // Uses tar (available on Windows 10+) and PowerShell
+    installCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "`
+      + `$ErrorActionPreference='Continue'; `
+      + `$tmpDir = Join-Path $env:TEMP ('skillhub-install-' + (Get-Random)); `
+      + `New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null; `
+      + `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; `
+      + `Invoke-WebRequest -Uri '${tarURL}' -OutFile (Join-Path $tmpDir 'latest.tar.gz') -UseBasicParsing; `
+      + `$extractDir = Join-Path $tmpDir 'extracted'; `
+      + `New-Item -ItemType Directory -Path $extractDir -Force | Out-Null; `
+      + `tar -xzf (Join-Path $tmpDir 'latest.tar.gz') -C $extractDir; `
+      + `$installer = Get-ChildItem -Path $extractDir -Recurse -Filter 'install.sh' | Select-Object -First 1; `
+      + `$bashExe = Get-Command bash -ErrorAction SilentlyContinue; `
+      + `if ($installer -and $bashExe) { & bash $installer.FullName --cli-only } `
+      + `else { `
+      + `$bin = Get-ChildItem -Path $extractDir -Recurse | Where-Object { $_.Name -match '^skillhub(\\.exe)?$' -and -not $_.PSIsContainer } | Select-Object -First 1; `
+      + `if ($bin) { $destDir = Join-Path $env:LOCALAPPDATA 'skillhub' 'bin'; New-Item -ItemType Directory -Path $destDir -Force | Out-Null; Copy-Item $bin.FullName (Join-Path $destDir 'skillhub.exe') -Force; Write-Host ('Copied to ' + $destDir) } `
+      + `else { Write-Error 'skillhub binary not found in archive' } `
+      + `}; `
+      + `Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue`
+      + `"`;
   } else {
     const installScriptUrl = 'https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/install.sh';
     installCmd = `curl -fsSL ${installScriptUrl} | bash -s -- --cli-only`;
@@ -537,9 +608,15 @@ export async function installFromMarket(
 
   try {
     const bin = getSkillHubBin();
-    const { stdout, stderr } = await execAsync(`${bin} install "${skillName}"`, {
+    // Use --dir flag to tell skillhub CLI to install into USER_SKILLS_DIR_ABSOLUTE
+    // skillhub CLI default --dir is "./skills" (relative to CWD), which creates
+    // an unwanted nested "skills/" directory. Using --dir directly is the correct approach.
+    // In packaged Electron, USER_SKILLS_DIR_ABSOLUTE is {userData}/user-skills/
+    const installEnv = getExtendedEnv();
+    const installDir = USER_SKILLS_DIR_ABSOLUTE;
+    const { stdout, stderr } = await execAsync(`${bin} --dir "${installDir}" install "${skillName}"`, {
       timeout: 120000, // 2 minutes timeout for installation
-      env: getExtendedEnv()
+      env: installEnv,
     });
 
     if (stderr && stderr.includes('error')) {
@@ -547,6 +624,22 @@ export async function installFromMarket(
         success: false,
         error: stderr
       };
+    }
+
+    // Post-install: refresh skill registry so the new skill appears in the list
+    onProgress?.('register', 'Registering skill...');
+    try {
+      const { validateAndUpdatePluginJson } = await import('@/lib/services/skill-service');
+      await validateAndUpdatePluginJson();
+    } catch (regError) {
+      console.warn('[SkillMarket] Post-install plugin.json update failed:', regError);
+    }
+
+    try {
+      const { rebuildRegistry } = await import('@/lib/services/api-skill-registry');
+      await rebuildRegistry();
+    } catch (regError) {
+      console.warn('[SkillMarket] Post-install registry rebuild failed:', regError);
     }
 
     onProgress?.('done', 'Installation completed!');

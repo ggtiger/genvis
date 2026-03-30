@@ -290,6 +290,34 @@ if (Test-Path "git-runtime-removed") {
     Remove-Item -Recurse -Force "git-runtime-removed"
 }
 
+# Step 4.7: Build/Check SkillHub CLI
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Yellow
+Write-Host "Step 4.7/6 : Build/Check SkillHub CLI" -ForegroundColor Yellow
+Write-Host "========================================" -ForegroundColor Yellow
+Write-Host ""
+
+$skillhubCliPath = "skillhub-cli\win32-x64\bin\skillhub.exe"
+
+if (Test-Path $skillhubCliPath) {
+    Write-Info "SkillHub CLI already exists at: $skillhubCliPath"
+    Write-Success "SkillHub CLI check passed"
+} else {
+    Write-Info "SkillHub CLI not found, building..."
+    Write-Info "Running: scripts\build-skillhub-cli.ps1"
+
+    try {
+        & ".\scripts\build-skillhub-cli.ps1"
+        if (Test-Path $skillhubCliPath) {
+            Write-Success "SkillHub CLI built successfully"
+        } else {
+            Write-Host "[WARN] SkillHub CLI build completed but binary not found (optional, continuing)" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "[WARN] SkillHub CLI build failed (optional, continuing without it): $_" -ForegroundColor Yellow
+    }
+}
+
 # Step 5: Build Next.js
 Write-Step "5/6" "Build Next.js Application (standalone mode)"
 

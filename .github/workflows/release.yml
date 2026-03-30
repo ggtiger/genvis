@@ -80,6 +80,7 @@ jobs:
       - name: Build (ARM64)
         run: |
           chmod +x ./tools/build-mac2.sh
+          chmod +x ./scripts/build-skillhub-cli-mac.sh
           ./tools/build-mac2.sh --arch arm64 --skip-type-check --skip-test
         env:
           CI: 'true'
@@ -181,6 +182,7 @@ jobs:
       - name: Build (x64)
         run: |
           chmod +x ./tools/build-mac2.sh
+          chmod +x ./scripts/build-skillhub-cli-mac.sh
           ./tools/build-mac2.sh --arch x64 --skip-type-check --skip-test
         env:
           CI: 'true'
@@ -277,6 +279,10 @@ jobs:
           $gitExe = "git-runtime\win32-x64\cmd\git.exe"
           if (-not (Test-Path $gitExe)) { Write-Error "git.exe not found"; exit 1 }
           Write-Host "Git Runtime OK: $(& $gitExe --version)"
+
+      - name: Build/Check SkillHub CLI
+        shell: pwsh
+        run: .\scripts\build-skillhub-cli.ps1
 
       - name: Build Windows package
         shell: pwsh

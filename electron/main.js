@@ -333,6 +333,34 @@ async function startProductionServer() {
     }
   }
 
+  // Inject builtin SkillHub CLI to PATH (for skill market operations)
+  {
+    const platform = process.platform;
+    const arch = process.arch;
+    let skillhubDir = null;
+    let skillhubExePath = null;
+
+    if (platform === 'win32') {
+      skillhubDir = path.join(process.resourcesPath, 'skillhub-cli', 'win32-x64', 'bin');
+      // Windows wrapper is a .cmd file
+      skillhubExePath = path.join(skillhubDir, 'skillhub.cmd');
+    } else if (platform === 'darwin') {
+      const platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+      skillhubDir = path.join(process.resourcesPath, 'skillhub-cli', platformDir, 'bin');
+      skillhubExePath = path.join(skillhubDir, 'skillhub');
+    }
+
+    if (skillhubExePath && fs.existsSync(skillhubExePath)) {
+      const currentPath = env.PATH || process.env.PATH || '';
+      env.PATH = skillhubDir + path.delimiter + currentPath;
+      // Also set SKILLHUB_BUILTIN_PATH so skill-market.ts can find it directly
+      env.SKILLHUB_BUILTIN_PATH = skillhubExePath;
+      console.log('[INFO] Injected builtin SkillHub CLI to PATH:', skillhubDir);
+    } else if (skillhubExePath) {
+      console.log('[INFO] Builtin SkillHub CLI not bundled (optional):', skillhubExePath);
+    }
+  }
+
   // Resolve writable paths for production runtime
   try {
     const userDataDir = app.getPath('userData');

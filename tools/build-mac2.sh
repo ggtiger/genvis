@@ -285,6 +285,29 @@ else
     success "Node.js runtime built successfully"
 fi
 
+# Step 4.6: Check/Build SkillHub CLI
+echo ""
+echo -e "\033[0;33mStep 4.6/8 : Check/Build SkillHub CLI\033[0m"
+echo -e "\033[0;33m========================================\033[0m"
+echo ""
+
+SKILLHUB_CLI_PATH="skillhub-cli/$DARWIN_DIR/bin/skillhub"
+
+if [ -f "$SKILLHUB_CLI_PATH" ]; then
+    info "SkillHub CLI already exists at: $SKILLHUB_CLI_PATH"
+    success "SkillHub CLI check passed"
+else
+    info "SkillHub CLI not found, building..."
+    info "Running: ./scripts/build-skillhub-cli-mac.sh --arch $ARCH"
+
+    chmod +x ./scripts/build-skillhub-cli-mac.sh 2>/dev/null || true
+    if ./scripts/build-skillhub-cli-mac.sh --arch "$ARCH"; then
+        success "SkillHub CLI built successfully"
+    else
+        info "[WARN] SkillHub CLI build failed (optional, continuing without it)"
+    fi
+fi
+
 # Step 5: Build Next.js
 step "5/8" "Build Next.js Application (standalone mode)"
 

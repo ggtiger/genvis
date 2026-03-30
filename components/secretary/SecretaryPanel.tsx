@@ -1236,23 +1236,22 @@ interface MentionState {
   query: string;
 }
 
-// ========== @Mention dropdown ==========
-function EmployeeMentionMenu({
-  employees,
-  query,
+type MentionItem =
+  | { type: 'employee'; id: string; name: string; description?: string; mode: string; data: Employee }
+  | { type: 'project'; id: string; name: string; description?: string; projectId: string };
+
+// ========== @Mention dropdown (employees + projects) ==========
+function MentionMenu({
+  items,
   onSelect,
   position,
   selectedIdx,
 }: {
-  employees: Employee[];
-  query: string;
-  onSelect: (employee: Employee) => void;
+  items: MentionItem[];
+  onSelect: (item: MentionItem) => void;
   position: { bottom: number; left: number };
   selectedIdx: number;
 }) {
-  const filtered = employees.filter(
-    (e) => e.mode !== 'secretary' && e.name.toLowerCase().includes(query.toLowerCase())
-  );
   const menuRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -1260,35 +1259,74 @@ function EmployeeMentionMenu({
     itemRefs.current[selectedIdx]?.scrollIntoView({ block: 'nearest' });
   }, [selectedIdx]);
 
-  if (filtered.length === 0) return null;
+  if (items.length === 0) return null;
+
+  const employeeItems = items.filter((i): i is MentionItem & { type: 'employee' } => i.type === 'employee');
+  const projectItems = items.filter((i): i is MentionItem & { type: 'project' } => i.type === 'project');
+
+  let globalIdx = 0;
 
   return (
     <div
       ref={menuRef}
-      className="absolute z-50 w-64 max-h-52 overflow-y-auto bg-white/70 dark:bg-slate-800/80 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-xl shadow-lg py-1"
+      className="absolute z-50 w-72 max-h-60 overflow-y-auto bg-white/70 dark:bg-slate-800/80 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-xl shadow-lg py-1"
       style={{ bottom: position.bottom, left: position.left }}
     >
-      {filtered.map((emp, idx) => (
-        <button
-          key={emp.id}
-          ref={(el) => { itemRefs.current[idx] = el; }}
-          onMouseDown={(e) => { e.preventDefault(); onSelect(emp); }}
-          className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-primary/5 transition-colors ${idx === selectedIdx ? 'bg-primary/5' : ''}`}
-        >
-          <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-            <User className="w-4 h-4 text-primary" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-text-main truncate">{emp.name}</div>
-            {emp.description && (
-              <div className="text-xs text-text-secondary truncate">{emp.description}</div>
-            )}
-          </div>
-          <span className="text-[10px] text-text-secondary px-1.5 py-0.5 bg-bg-subtle rounded">
-            {emp.mode === 'code' ? '编程' : '工作'}
-          </span>
-        </button>
-      ))}
+      {employeeItems.length > 0 && (
+        <>
+          <div className="px-3 py-1 text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">员工</div>
+          {employeeItems.map((item) => {
+            const idx = globalIdx++;
+            return (
+              <button
+                key={`emp-${item.id}`}
+                ref={(el) => { itemRefs.current[idx] = el; }}
+                onMouseDown={(e) => { e.preventDefault(); onSelect(item); }}
+                className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-primary/5 transition-colors ${idx === selectedIdx ? 'bg-primary/5' : ''}`}
+              >
+                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <User className="w-4 h-4 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-text-main truncate">{item.name}</div>
+                  {item.description && <div className="text-xs text-text-secondary truncate">{item.description}</div>}
+                </div>
+                <span className="text-[10px] text-text-secondary px-1.5 py-0.5 bg-bg-subtle rounded">
+                  {item.mode === 'code' ? '编程' : '工作'}
+                </span>
+              </button>
+            );
+          })}
+        </>
+      )}
+      {projectItems.length > 0 && (
+        <>
+          {employeeItems.length > 0 && <div className="my-1 border-t border-border-subtle/30" />}
+          <div className="px-3 py-1 text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">项目</div>
+          {projectItems.map((item) => {
+            const idx = globalIdx++;
+            return (
+              <button
+                key={`proj-${item.projectId}`}
+                ref={(el) => { itemRefs.current[idx] = el; }}
+                onMouseDown={(e) => { e.preventDefault(); onSelect(item); }}
+                className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-primary/5 transition-colors ${idx === selectedIdx ? 'bg-primary/5' : ''}`}
+              >
+                <div className="w-7 h-7 rounded-full bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                  <FolderOpen className="w-4 h-4 text-blue-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-text-main truncate">{item.name}</div>
+                  {item.description && <div className="text-xs text-text-secondary truncate">{item.description}</div>}
+                </div>
+                <span className="text-[10px] text-text-secondary px-1.5 py-0.5 bg-blue-500/5 rounded truncate max-w-[60px]">
+                  {item.projectId.slice(0, 8)}
+                </span>
+              </button>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
@@ -1356,13 +1394,19 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
 
   // @Mention state
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [projectList, setProjectList] = useState<Array<{ id: string; name: string; description?: string | null; status?: string; employee_id?: string | null }>>([]);
   const [mention, setMention] = useState<MentionState>({ active: false, startIndex: 0, query: '' });
   const [mentionSelectedIdx, setMentionSelectedIdx] = useState(0);
 
-  // Compute filtered employees for keyboard navigation
-  const mentionFiltered = mention.active
-    ? employees.filter((e) => e.mode !== 'secretary' && e.name.toLowerCase().includes(mention.query.toLowerCase()))
-    : [];
+  // Compute filtered mention items (employees + projects) for keyboard navigation
+  const mentionFiltered: MentionItem[] = mention.active ? [
+    ...employees
+      .filter(e => e.mode !== 'secretary' && e.name.toLowerCase().includes(mention.query.toLowerCase()))
+      .map(e => ({ type: 'employee' as const, id: e.id, name: e.name, description: e.description, mode: e.mode, data: e })),
+    ...projectList
+      .filter(p => p.name.toLowerCase().includes(mention.query.toLowerCase()))
+      .map(p => ({ type: 'project' as const, id: p.id, name: p.name, description: p.description ?? undefined, projectId: p.id })),
+  ] : [];
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -1491,6 +1535,23 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
       }
     }
     fetchEmployees();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load projects for @mention
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchProjects() {
+      try {
+        const response = await fetch(`${API_BASE}/api/projects?page=1&pageSize=30`);
+        if (response.ok) {
+          const data = await response.json();
+          const list = data.data?.projects || data.data || [];
+          if (!cancelled) setProjectList(list);
+        }
+      } catch { /* ignore */ }
+    }
+    fetchProjects();
     return () => { cancelled = true; };
   }, []);
 
@@ -2115,6 +2176,69 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
     [waitingFeedbacks, toast]
   );
 
+  // Send message to an existing project via send-message API
+  const sendToProject = useCallback(
+    async (projectId: string, projectName: string, instruction: string, fullMessage: string) => {
+      setSending(true);
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+      }, 50);
+
+      try {
+        // 1. Save user message + auto-reply to secretary session
+        const saveResponse = await fetch(`${API_BASE}/api/secretary/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: fullMessage,
+            senderName: '我',
+            enabledSkills,
+            forceDispatchResult: {
+              reply: `已向项目「${projectName}」发送消息，等待执行结果...⏳`,
+              actions: [{ type: 'dispatch', employeeId: '', employeeName: projectName, projectId }],
+            },
+          }),
+        });
+
+        if (!saveResponse.ok) {
+          throw new Error('保存消息失败');
+        }
+
+        // 2. Call send-message API
+        const response = await fetch(`${API_BASE}/api/projects/send-message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, message: instruction }),
+        });
+        const result = await response.json();
+
+        if (result.busy) {
+          toast.warning(`项目「${projectName}」正在执行中，请稍后再发送`);
+        } else if (result.success) {
+          // Track dispatch for completion notification
+          setTrackedDispatches((prev) => {
+            const next = new Map(prev);
+            next.set(projectId, { employeeName: projectName });
+            return next;
+          });
+          toast.success(`消息已发送给项目「${projectName}」`);
+        } else {
+          toast.error(result.error || '发送失败');
+        }
+
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+        }, 100);
+      } catch (error) {
+        console.error('[SecretaryPanel] Send to project failed:', error);
+        toast.error(`发送失败：${error instanceof Error ? error.message : '未知错误'}`);
+      } finally {
+        setSending(false);
+      }
+    },
+    [toast, enabledSkills]
+  );
+
   // Send message
   const handleSend = async () => {
     const content = inputValue.trim();
@@ -2129,17 +2253,30 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
 
     setMention({ active: false, startIndex: 0, query: '' });
 
-    // Detect @employeeName + instruction pattern for auto-dispatch
+    // Detect @employeeName or @projectName + instruction pattern
     if (content.startsWith('@')) {
       const afterAt = content.slice(1);
+      // 1. Try matching employee name (existing behavior: create new project & dispatch)
       const matchedEmp = employees
         .filter((e) => afterAt.startsWith(e.name))
         .sort((a, b) => b.name.length - a.name.length)[0];
       if (matchedEmp) {
         const rest = afterAt.slice(matchedEmp.name.length).trim();
         if (rest) {
-          // Has instruction text after the name — auto dispatch
           directDispatch(matchedEmp, rest, content, attachments);
+          setInputValue('');
+          setAttachments([]);
+          return;
+        }
+      }
+      // 2. Try matching project name (send message to existing project)
+      const matchedProj = projectList
+        .filter((p) => afterAt.startsWith(p.name))
+        .sort((a, b) => b.name.length - a.name.length)[0];
+      if (matchedProj) {
+        const rest = afterAt.slice(matchedProj.name.length).trim();
+        if (rest) {
+          sendToProject(matchedProj.id, matchedProj.name, rest, content);
           setInputValue('');
           setAttachments([]);
           return;
@@ -2261,8 +2398,7 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
         // Select the highlighted mention item
         e.preventDefault();
         if (mentionFiltered.length > 0) {
-          const emp = mentionFiltered[mentionSelectedIdx] as Employee;
-          handleMentionSelect(emp);
+          handleMentionSelect(mentionFiltered[mentionSelectedIdx]);
         }
         return;
       }
@@ -2292,17 +2428,17 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
     setMention({ active: false, startIndex: 0, query: '' });
   };
 
-  // Insert @mention into input
-  const handleMentionSelect = (employee: Employee) => {
+  // Insert @mention into input (supports both employee and project)
+  const handleMentionSelect = (item: MentionItem) => {
     const before = inputValue.slice(0, mention.startIndex);
     const after = inputValue.slice(mention.startIndex + 1 + mention.query.length);
-    const newValue = `${before}@${employee.name} ${after}`;
+    const newValue = `${before}@${item.name} ${after}`;
     setInputValue(newValue);
     setMention({ active: false, startIndex: 0, query: '' });
     // Focus textarea and set cursor after the inserted mention
     setTimeout(() => {
       if (textareaRef.current) {
-        const cursorPos = before.length + 1 + employee.name.length + 1;
+        const cursorPos = before.length + 1 + item.name.length + 1;
         textareaRef.current.focus();
         textareaRef.current.setSelectionRange(cursorPos, cursorPos);
       }
@@ -2916,11 +3052,10 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
               )}
             </div>
           )}
-          {/* @Mention dropdown */}
-          {mention.active && employees.length > 0 && (
-            <EmployeeMentionMenu
-              employees={employees}
-              query={mention.query}
+          {/* @Mention dropdown (employees + projects) */}
+          {mention.active && mentionFiltered.length > 0 && (
+            <MentionMenu
+              items={mentionFiltered}
               onSelect={handleMentionSelect}
               position={{ bottom: 100, left: 16 }}
               selectedIdx={mentionSelectedIdx}

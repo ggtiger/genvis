@@ -96,6 +96,9 @@ node-runtime/
 # Git Runtime (too large for git)
 git-runtime/
 
+# SkillHub CLI Runtime (downloaded at build time)
+skillhub-cli/
+
 # Windows special device files and debug outputs
 nul
 run*.txt
