@@ -55,7 +55,8 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 const IS_WIN = process.platform === 'win32';
 const PATH_SEP = IS_WIN ? ';' : ':';
-const SKILLHUB_BIN = IS_WIN ? 'skillhub.exe' : 'skillhub';
+// On Windows, skillhub may be .cmd (bundled wrapper), .exe, or extensionless (bash script from install.sh)
+const SKILLHUB_BIN = 'skillhub';
 
 /** Cached resolved path to the skillhub binary */
 let _resolvedSkillHubPath: string | null = null;
@@ -110,16 +111,24 @@ function getCommonPaths(): string[] {
   if (IS_WIN) {
     const appData = process.env.APPDATA || '';
     const localAppData = process.env.LOCALAPPDATA || '';
-    return [
-      ...(appData ? [`${appData}\\skillhub\\bin\\${SKILLHUB_BIN}`] : []),
-      ...(localAppData ? [`${localAppData}\\skillhub\\bin\\${SKILLHUB_BIN}`] : []),
+    // On Windows, skillhub may be .cmd, .exe, or extensionless bash script
+    const winCandidates: string[] = [];
+    const winDirs = [
+      ...(localAppData ? [`${localAppData}\\skillhub\\bin`] : []),
+      ...(appData ? [`${appData}\\skillhub\\bin`] : []),
       ...(HOME_DIR ? [
-        `${HOME_DIR}\\.skillhub\\bin\\${SKILLHUB_BIN}`,
-        `${HOME_DIR}\\.local\\bin\\${SKILLHUB_BIN}`,
+        `${HOME_DIR}\\.skillhub\\bin`,
+        `${HOME_DIR}\\.local\\bin`,
       ] : []),
+    ];
+    for (const dir of winDirs) {
+      winCandidates.push(`${dir}\\skillhub.cmd`, `${dir}\\skillhub.exe`, `${dir}\\skillhub`);
+    }
+    winCandidates.push(
       'C:\\Program Files\\skillhub\\bin\\skillhub.exe',
       'C:\\Program Files (x86)\\skillhub\\bin\\skillhub.exe',
-    ];
+    );
+    return winCandidates;
   }
   return [
     '/usr/local/bin/skillhub',
@@ -136,7 +145,7 @@ function getCommonPaths(): string[] {
  * Returns the cached path, or falls back to bare command name.
  */
 export function getSkillHubBin(): string {
-  return _resolvedSkillHubPath || (IS_WIN ? 'skillhub.exe' : 'skillhub');
+  return _resolvedSkillHubPath || 'skillhub';
 }
 
 /**
@@ -150,7 +159,7 @@ function getExtendedEnv(): NodeJS.ProcessEnv {
     ? [
         ...(process.env.APPDATA ? [`${process.env.APPDATA}\\skillhub\\bin`] : []),
         ...(process.env.LOCALAPPDATA ? [`${process.env.LOCALAPPDATA}\\skillhub\\bin`] : []),
-        ...(HOME_DIR ? [`${HOME_DIR}\\.skillhub\\bin`] : []),
+        ...(HOME_DIR ? [`${HOME_DIR}\\.skillhub\\bin`, `${HOME_DIR}\\.local\\bin`] : []),
       ]
     : [
         '/usr/local/bin',
@@ -190,20 +199,25 @@ export async function isSkillHubAvailable(): Promise<boolean> {
   }
 
   // Try `which` (Unix) or `where` (Windows) with extended PATH
-  const whichCmd = IS_WIN ? `where ${SKILLHUB_BIN}` : `which ${SKILLHUB_BIN}`;
-  try {
-    const { stdout } = await execAsync(whichCmd, {
-      timeout: 5000,
-      env: getExtendedEnv(),
-    });
-    // `where` on Windows may return multiple lines; take the first
-    const resolved = stdout.trim().split(/\r?\n/)[0]?.trim();
-    if (resolved && resolved.length > 0) {
-      _resolvedSkillHubPath = resolved;
-      return true;
+  // On Windows, try multiple extensions: .cmd (bundled), .exe, and extensionless
+  const whichCmds = IS_WIN
+    ? ['where skillhub.cmd', 'where skillhub.exe', 'where skillhub']
+    : [`which ${SKILLHUB_BIN}`];
+  for (const whichCmd of whichCmds) {
+    try {
+      const { stdout } = await execAsync(whichCmd, {
+        timeout: 5000,
+        env: getExtendedEnv(),
+      });
+      // `where` on Windows may return multiple lines; take the first
+      const resolved = stdout.trim().split(/\r?\n/)[0]?.trim();
+      if (resolved && resolved.length > 0) {
+        _resolvedSkillHubPath = resolved;
+        return true;
+      }
+    } catch {
+      // try next
     }
-  } catch {
-    // fall through to path scan
   }
 
   // Fallback: check common installation paths directly
@@ -243,8 +257,8 @@ export async function installSkillHubCLI(
   const tarURL = 'https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/latest.tar.gz';
   let installCmd: string;
   if (IS_WIN) {
-    // Windows: download tar.gz, extract, find and run installer or copy binary directly
-    // Uses tar (available on Windows 10+) and PowerShell
+    // Windows: download tar.gz, extract, run install.sh via bash if available,
+    // otherwise manually install Python CLI files + create .cmd wrapper
     installCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "`
       + `$ErrorActionPreference='Continue'; `
       + `$tmpDir = Join-Path $env:TEMP ('skillhub-install-' + (Get-Random)); `
@@ -258,9 +272,21 @@ export async function installSkillHubCLI(
       + `$bashExe = Get-Command bash -ErrorAction SilentlyContinue; `
       + `if ($installer -and $bashExe) { & bash $installer.FullName --cli-only } `
       + `else { `
-      + `$bin = Get-ChildItem -Path $extractDir -Recurse | Where-Object { $_.Name -match '^skillhub(\\.exe)?$' -and -not $_.PSIsContainer } | Select-Object -First 1; `
-      + `if ($bin) { $destDir = Join-Path $env:LOCALAPPDATA 'skillhub' 'bin'; New-Item -ItemType Directory -Path $destDir -Force | Out-Null; Copy-Item $bin.FullName (Join-Path $destDir 'skillhub.exe') -Force; Write-Host ('Copied to ' + $destDir) } `
-      + `else { Write-Error 'skillhub binary not found in archive' } `
+      // Manual install: find skills_store_cli.py and set up ~/.skillhub/ + .cmd wrapper
+      + `$cliPy = Get-ChildItem -Path $extractDir -Recurse -Filter 'skills_store_cli.py' | Select-Object -First 1; `
+      + `if ($cliPy) { `
+      + `$skillhubHome = Join-Path $env:USERPROFILE '.skillhub'; `
+      + `New-Item -ItemType Directory -Path $skillhubHome -Force | Out-Null; `
+      + `Copy-Item $cliPy.FullName (Join-Path $skillhubHome 'skills_store_cli.py') -Force; `
+      + `$srcDir = $cliPy.DirectoryName; `
+      + `foreach ($f in @('skills_upgrade.py','config.json','metadata.json','version.json')) { `
+      + `$fp = Join-Path $srcDir $f; if (Test-Path $fp) { Copy-Item $fp (Join-Path $skillhubHome $f) -Force } }; `
+      + '$binDir = Join-Path $env:LOCALAPPDATA \'skillhub\' \'bin\'; '
+      + 'New-Item -ItemType Directory -Path $binDir -Force | Out-Null; '
+      + '$cmdLines = @("@echo off","setlocal","set \"CLI=%USERPROFILE%\.skillhub\skills_store_cli.py\"","if not exist \"%CLI%\" (echo Error: SkillHub CLI not found >&2 ^& exit /b 1)","python \"%CLI%\" %*"); '
+      + '[System.IO.File]::WriteAllLines((Join-Path $binDir \'skillhub.cmd\'), $cmdLines); '
+      + 'Write-Host (\'Installed CLI to \' + $skillhubHome + \', wrapper at \' + $binDir) '
+      + `} else { Write-Error 'skills_store_cli.py not found in archive' } `
       + `}; `
       + `Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue`
       + `"`;
