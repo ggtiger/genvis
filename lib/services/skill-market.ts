@@ -362,7 +362,13 @@ export async function searchMarketSkills(
   const cliAvailable = await isSkillHubAvailable();
 
   if (cliAvailable) {
-    return searchViaCLI(query, page, limit);
+    try {
+      return await searchViaCLI(query, page, limit);
+    } catch (cliError) {
+      // CLI search failed (e.g. network timeout, wrong CLI version)
+      // Fall through to web API
+      console.warn('[SkillMarket] CLI search failed, falling back to web API:', cliError instanceof Error ? cliError.message : cliError);
+    }
   }
 
   // Fallback: fetch from SkillHub website API
@@ -404,7 +410,8 @@ async function searchViaCLI(
       skills = parseSkillHubOutput(stdout);
     } catch (error) {
       console.error('[SkillMarket] CLI search failed:', error);
-      throw new Error(`Search failed: ${error instanceof Error ? error.message : String(error)}`);
+      // Don't throw - let caller fall back to web API
+      throw error;
     }
   }
 
@@ -433,33 +440,40 @@ async function searchViaWebAPI(
   page: number,
   limit: number,
 ): Promise<MarketSearchResult> {
-  // SkillHub API endpoint (if available)
-  // Note: This is a placeholder - actual API needs to be discovered
-  const baseUrl = 'https://skillhub.tencent.com/api';
+  // SkillHub search API (same as used by skills_store_cli.py)
+  const searchUrl = 'https://lightmake.site/api/v1/search';
+  // Full index for browsing (no query)
+  const indexUrl = 'https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills.json';
 
   try {
-    const params = new URLSearchParams({
-      q: query || '',
-    page: String(page),
-    limit: String(limit)
-  });
+    let rawSkills: unknown[] = [];
+    let totalCount = 0;
 
-    const response = await fetch(`${baseUrl}/skills?${params}`, {
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Genvis/1.0'
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
+    if (query) {
+      // Use search API
+      const params = new URLSearchParams({
+        q: query,
+        limit: String(limit),
+      });
+      const response = await fetch(`${searchUrl}?${params}`, {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'Genvis/1.0' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error(`Search API returned ${response.status}`);
+      const data = await response.json();
+      rawSkills = data.results || data.skills || data.data || [];
+      totalCount = rawSkills.length;
+    } else {
+      // Fetch full index for browsing
+      const response = await fetch(indexUrl, {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'Genvis/1.0' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error(`Index API returned ${response.status}`);
+      const data = await response.json();
+      rawSkills = Array.isArray(data) ? data : (data.skills || data.results || data.data || []);
+      totalCount = rawSkills.length;
     }
-
-    const data = await response.json();
-
-    // API may return { results: [...], count } or { skills: [...], total }
-    const rawSkills: unknown[] = data.results || data.skills || data.data || [];
-    const totalCount: number = data.count || data.total || rawSkills.length;
 
     const skills: MarketSkill[] = rawSkills
       .filter((item): item is Record<string, unknown> =>
@@ -482,10 +496,19 @@ async function searchViaWebAPI(
       }))
       .filter(s => s.name);
 
+    // Update cache for full index
+    if (!query && page === 1) {
+      cachedSkills = skills;
+      cacheTime = Date.now();
+    }
+
+    const start = (page - 1) * limit;
+    const end = start + limit;
+
     return {
-      skills,
+      skills: skills.slice(start, end),
       total: totalCount,
-      hasMore: (page * limit) < totalCount,
+      hasMore: end < totalCount,
       page
     };
   } catch (error) {
