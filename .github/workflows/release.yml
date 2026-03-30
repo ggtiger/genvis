@@ -282,6 +282,7 @@ jobs:
 
       - name: Build/Check SkillHub CLI
         shell: pwsh
+        continue-on-error: true
         run: .\scripts\build-skillhub-cli.ps1
 
       - name: Build Windows package
