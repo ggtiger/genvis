@@ -619,93 +619,162 @@ function parseSkillHubOutput(output: string): MarketSkill[] {
 }
 
 /**
- * Install a skill from the marketplace
- * Automatically installs SkillHub CLI if not available
+ * Install a skill from the marketplace.
+ * Strategy:
+ *   1. Try CLI with --dir flag (Python-based skillhub)
+ *   2. If --dir not supported, try CLI without --dir (npm-based skillhub-cli)
+ *   3. If CLI fails entirely, download zip directly via web API
  */
 export async function installFromMarket(
   skillName: string,
   onProgress?: (step: string, message: string) => void
 ): Promise<InstallResult> {
-  let cliAvailable = await isSkillHubAvailable();
+  const installDir = USER_SKILLS_DIR_ABSOLUTE;
 
-  // Auto-install CLI if not available
-  if (!cliAvailable) {
-    onProgress?.('cli-install', 'SkillHub CLI not found. Installing automatically...');
-
-    const cliResult = await installSkillHubCLI((step, message) => {
-      onProgress?.(`cli-${step}`, message);
-    });
-
-    if (!cliResult.success) {
-      return {
-        success: false,
-        error: `Failed to install SkillHub CLI: ${cliResult.error}`
-      };
-    }
-
-    // Re-check CLI availability
-    cliAvailable = await isSkillHubAvailable();
-    if (!cliAvailable) {
-      return {
-        success: false,
-        error: 'SkillHub CLI installation completed but command not found. Please restart the app and try again.'
-      };
-    }
-  }
+  // Ensure install directory exists
+  try {
+    fs.mkdirSync(installDir, { recursive: true });
+  } catch { /* already exists */ }
 
   onProgress?.('install', `Installing ${skillName}...`);
 
-  try {
-    const bin = getSkillHubBin();
-    // Use --dir flag to tell skillhub CLI to install into USER_SKILLS_DIR_ABSOLUTE
-    // skillhub CLI default --dir is "./skills" (relative to CWD), which creates
-    // an unwanted nested "skills/" directory. Using --dir directly is the correct approach.
-    // In packaged Electron, USER_SKILLS_DIR_ABSOLUTE is {userData}/user-skills/
-    const installEnv = getExtendedEnv();
-    const installDir = USER_SKILLS_DIR_ABSOLUTE;
-    const { stdout, stderr } = await execAsync(`${bin} --dir "${installDir}" install "${skillName}"`, {
-      timeout: 120000, // 2 minutes timeout for installation
-      env: installEnv,
-    });
-
-    if (stderr && stderr.includes('error')) {
-      return {
-        success: false,
-        error: stderr
-      };
+  // Try CLI install first
+  const cliAvailable = await isSkillHubAvailable();
+  if (cliAvailable) {
+    const cliResult = await tryInstallViaCLI(skillName, installDir);
+    if (cliResult.success) {
+      await postInstallRefresh(onProgress);
+      return cliResult;
     }
-
-    // Post-install: refresh skill registry so the new skill appears in the list
-    onProgress?.('register', 'Registering skill...');
-    try {
-      const { validateAndUpdatePluginJson } = await import('@/lib/services/skill-service');
-      await validateAndUpdatePluginJson();
-    } catch (regError) {
-      console.warn('[SkillMarket] Post-install plugin.json update failed:', regError);
-    }
-
-    try {
-      const { rebuildRegistry } = await import('@/lib/services/api-skill-registry');
-      await rebuildRegistry();
-    } catch (regError) {
-      console.warn('[SkillMarket] Post-install registry rebuild failed:', regError);
-    }
-
-    onProgress?.('done', 'Installation completed!');
-
-    return {
-      success: true,
-      skillName
-    };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('[SkillMarket] Install failed:', errorMsg);
-
-    return {
-      success: false,
-      error: `Installation failed: ${errorMsg}`
-    };
+    // CLI failed - log and fall through to direct download
+    console.warn('[SkillMarket] CLI install failed, trying direct download:', cliResult.error);
   }
+
+  // Fallback: direct download via web API
+  onProgress?.('download', `Downloading ${skillName} from marketplace...`);
+  const dlResult = await installViaDirectDownload(skillName, installDir);
+  if (dlResult.success) {
+    await postInstallRefresh(onProgress);
+  }
+  return dlResult;
+}
+
+/**
+ * Try installing via CLI (handles both Python and npm versions)
+ */
+async function tryInstallViaCLI(
+  skillName: string,
+  installDir: string,
+): Promise<InstallResult> {
+  const bin = getSkillHubBin();
+  const installEnv = getExtendedEnv();
+
+  // Attempt 1: with --dir flag (Python-based CLI)
+  try {
+    const { stdout, stderr } = await execAsync(
+      `${bin} --dir "${installDir}" install "${skillName}"`,
+      { timeout: 120000, env: installEnv }
+    );
+    if (stderr && stderr.includes('error') && !stderr.includes('info:')) {
+      return { success: false, error: stderr };
+    }
+    return { success: true, skillName };
+  } catch (dirError) {
+    const errMsg = dirError instanceof Error ? dirError.message : String(dirError);
+    // If --dir is not recognized, try without it (npm-based CLI)
+    if (errMsg.includes('unknown option') || errMsg.includes('--dir')) {
+      console.warn('[SkillMarket] CLI does not support --dir, trying with cwd...');
+      try {
+        const { stdout, stderr } = await execAsync(
+          `${bin} install "${skillName}"`,
+          { timeout: 120000, env: installEnv, cwd: installDir }
+        );
+        if (stderr && stderr.includes('error') && !stderr.includes('info:')) {
+          return { success: false, error: stderr };
+        }
+        return { success: true, skillName };
+      } catch (cwdError) {
+        return { success: false, error: cwdError instanceof Error ? cwdError.message : String(cwdError) };
+      }
+    }
+    return { success: false, error: errMsg };
+  }
+}
+
+/**
+ * Install a skill by directly downloading the zip from SkillHub CDN.
+ * No CLI dependency - pure HTTP download + zip extraction.
+ */
+async function installViaDirectDownload(
+  skillName: string,
+  installDir: string,
+): Promise<InstallResult> {
+  // Download URLs (same as used by Python CLI)
+  const primaryUrl = `https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/${encodeURIComponent(skillName)}.zip`;
+  const fallbackUrl = `https://lightmake.site/api/v1/download?slug=${encodeURIComponent(skillName)}`;
+
+  const targetDir = path.join(installDir, skillName);
+
+  // Don't overwrite existing
+  if (fs.existsSync(targetDir)) {
+    return { success: false, error: `Skill already exists at ${targetDir}. Remove it first to reinstall.` };
+  }
+
+  for (const url of [primaryUrl, fallbackUrl]) {
+    try {
+      console.log(`[SkillMarket] Downloading from: ${url}`);
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'Genvis/1.0' },
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (!response.ok) {
+        console.warn(`[SkillMarket] Download returned ${response.status} from ${url}`);
+        continue;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      // Extract zip to target directory
+      const { extractZipBuffer } = await import('@/lib/utils/zip-extract');
+      await extractZipBuffer(buffer, targetDir);
+
+      console.log(`[SkillMarket] Installed ${skillName} to ${targetDir}`);
+      return { success: true, skillName };
+    } catch (err) {
+      console.warn(`[SkillMarket] Download from ${url} failed:`, err instanceof Error ? err.message : err);
+      continue;
+    }
+  }
+
+  return {
+    success: false,
+    error: `Failed to download skill "${skillName}" from marketplace. Please check your network connection.`
+  };
+}
+
+/**
+ * Post-install: refresh skill registry so the new skill appears in the list
+ */
+async function postInstallRefresh(
+  onProgress?: (step: string, message: string) => void
+): Promise<void> {
+  onProgress?.('register', 'Registering skill...');
+  try {
+    const { validateAndUpdatePluginJson } = await import('@/lib/services/skill-service');
+    await validateAndUpdatePluginJson();
+  } catch (regError) {
+    console.warn('[SkillMarket] Post-install plugin.json update failed:', regError);
+  }
+
+  try {
+    const { rebuildRegistry } = await import('@/lib/services/api-skill-registry');
+    await rebuildRegistry();
+  } catch (regError) {
+    console.warn('[SkillMarket] Post-install registry rebuild failed:', regError);
+  }
+
+  onProgress?.('done', 'Installation completed!');
 }
 
 /**
