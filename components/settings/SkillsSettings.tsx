@@ -120,7 +120,7 @@ const SkillCard = memo(({ skill, onClick, onToggleEnabled, onRun }: SkillCardPro
 
 SkillCard.displayName = 'SkillCard';
 
-export default function SkillsSettings() {
+export default function SkillsSettings({ initialActiveTab }: { initialActiveTab?: 'my-skills' | 'market' } = {}) {
   const router = useRouter();
   const toast = useToast();
   const [skills, setSkills] = useState<(SkillMeta & { enabled?: boolean; hasUnfilledRequiredVars?: boolean })[]>([]);
@@ -129,7 +129,7 @@ export default function SkillsSettings() {
   const [importing, setImporting] = useState(false);
   const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
   const [skillFilter, setSkillFilter] = useState<'all' | 'app' | 'skill'>('all');
-  const [activeTab, setActiveTab] = useState<'my-skills' | 'market'>('my-skills');
+  const [activeTab, setActiveTab] = useState<'my-skills' | 'market'>(initialActiveTab || 'my-skills');
   const [thirdPartyOpen, setThirdPartyOpen] = useState(false);
   const [thirdPartyUrl, setThirdPartyUrl] = useState('');
   const [thirdPartyLoading, setThirdPartyLoading] = useState(false);

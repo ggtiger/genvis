@@ -132,7 +132,11 @@ const MemoizedMemorySettingsPanel = memo(MemorySettingsPanel);
 const MemoizedSoulSettings = memo(SoulSettings);
 
 export default function GlobalSettings({ isOpen, onClose, initialTab = 'ai-agents', embedded = false }: GlobalSettingsProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTabId>(initialTab === 'general' ? 'ai-agents' : initialTab === 'appearance' ? 'appearance' : (initialTab as SettingsTabId));
+  // Parse skills-market as skills tab with market sub-tab
+  const resolvedTab = initialTab === 'skills-market' ? 'skills' : (initialTab === 'general' ? 'ai-agents' : initialTab);
+  const skillsSubTab = initialTab === 'skills-market' ? 'market' : undefined;
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(resolvedTab as SettingsTabId);
+  const [skillsInitialSubTab, setSkillsInitialSubTab] = useState<'my-skills' | 'market' | undefined>(skillsSubTab);
   const [visitedTabs, setVisitedTabs] = useState<Set<SettingsTabId>>(() => new Set([activeTab]));
   const [cliStatus, setCLIStatus] = useState<CLIStatus>({});
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -148,11 +152,13 @@ export default function GlobalSettings({ isOpen, onClose, initialTab = 'ai-agent
   // Sync active tab when initialTab changes (e.g., opened from a specific banner)
   useEffect(() => {
     if (isOpen && initialTab) {
-      const tab = (initialTab === 'general' ? 'ai-agents' : initialTab) as SettingsTabId;
+      const tab = (initialTab === 'skills-market' ? 'skills' : initialTab === 'general' ? 'ai-agents' : initialTab) as SettingsTabId;
       if (SETTINGS_TABS.some(t => t.id === tab)) {
         setActiveTab(tab);
         setVisitedTabs(prev => new Set([...prev, tab]));
       }
+      // Handle skills-market sub-tab
+      setSkillsInitialSubTab(initialTab === 'skills-market' ? 'market' : undefined);
     }
   }, [isOpen, initialTab]);
 
@@ -826,7 +832,7 @@ export default function GlobalSettings({ isOpen, onClose, initialTab = 'ai-agent
 
             <div style={{ display: activeTab === 'skills' ? undefined : 'none' }}>
             {visitedTabs.has('skills') && (
-              <MemoizedSkillsSettings />
+              <MemoizedSkillsSettings initialActiveTab={skillsInitialSubTab} />
             )}
             </div>
 

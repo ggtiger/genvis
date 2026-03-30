@@ -338,8 +338,16 @@ export async function installSkillHubCLI(
   }
 }
 
+/** Track CLI search failures to avoid repeated slow timeouts */
+let _cliSearchFailed = false;
+let _cliSearchFailedTime = 0;
+const CLI_RETRY_INTERVAL = 5 * 60 * 1000; // Retry CLI after 5 minutes
+
 /**
- * Search skills from SkillHub marketplace
+ * Search skills from SkillHub marketplace.
+ * Uses Web API directly (fast & reliable). CLI is no longer tried for search
+ * because the npm-installed CLI on Windows connects to a different, often
+ * unreachable registry causing 30-60s timeouts.
  */
 export async function searchMarketSkills(
   query?: string,
@@ -358,20 +366,25 @@ export async function searchMarketSkills(
     };
   }
 
-  // Try SkillHub CLI first
-  const cliAvailable = await isSkillHubAvailable();
+  // Skip CLI if it previously failed (retry after CLI_RETRY_INTERVAL)
+  const shouldTryCli = !_cliSearchFailed || (Date.now() - _cliSearchFailedTime > CLI_RETRY_INTERVAL);
 
-  if (cliAvailable) {
-    try {
-      return await searchViaCLI(query, page, limit);
-    } catch (cliError) {
-      // CLI search failed (e.g. network timeout, wrong CLI version)
-      // Fall through to web API
-      console.warn('[SkillMarket] CLI search failed, falling back to web API:', cliError instanceof Error ? cliError.message : cliError);
+  if (shouldTryCli) {
+    const cliAvailable = await isSkillHubAvailable();
+    if (cliAvailable) {
+      try {
+        const result = await searchViaCLI(query, page, limit);
+        _cliSearchFailed = false; // CLI works, reset failure flag
+        return result;
+      } catch (cliError) {
+        _cliSearchFailed = true;
+        _cliSearchFailedTime = Date.now();
+        console.warn('[SkillMarket] CLI search failed, using web API (will skip CLI for 5min):', cliError instanceof Error ? cliError.message : cliError);
+      }
     }
   }
 
-  // Fallback: fetch from SkillHub website API
+  // Primary path: fetch from SkillHub web API (fast, works everywhere)
   return searchViaWebAPI(query, page, limit);
 }
 
@@ -384,7 +397,7 @@ async function searchViaCLI(
   limit: number,
 ): Promise<MarketSearchResult> {
   const bin = getSkillHubBin();
-  const timeout = 30000; // 30 seconds
+  const timeout = 10000; // 10 seconds (keep short to fail fast on unreachable registries)
 
   // Try JSON output first for richer data
   const jsonCmd = query ? `${bin} search "${query}" --json` : `${bin} list --json`;

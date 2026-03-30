@@ -8,7 +8,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { 
   getSecretaryEnabledSkills, 
-  setSecretaryEnabledSkills 
+  setSecretaryEnabledSkills,
+  getSecretarySettings,
+  updateSecretarySettings,
 } from '@/lib/services/secretary/secretary-settings';
 import { getAllSkills, type SkillMeta } from '@/lib/services/skill-service';
 
@@ -19,7 +21,7 @@ export async function GET() {
     // Get all available skills
     const allSkills = await getAllSkills();
     
-    // Filter to only skills with hasSkill=true (can be used as SDK skill)
+    // Filter to only non-app skills with hasSkill=true (can be used as SDK skill)
     const availableSkills: Array<{
       name: string;
       displayName?: string;
@@ -27,7 +29,7 @@ export async function GET() {
       hasSkill: boolean;
       hasApp: boolean;
     }> = allSkills
-      .filter((s: SkillMeta) => s.hasSkill)
+      .filter((s: SkillMeta) => s.hasSkill && !s.hasApp)
       .map((s: SkillMeta) => ({
         name: s.name,
         displayName: s.displayName,
@@ -36,17 +38,28 @@ export async function GET() {
         hasApp: s.hasApp,
       }));
     
-    // Get currently enabled skills for secretary
-    const enabledSkills = await getSecretaryEnabledSkills();
+    // Get current settings to check if skills have been configured
+    const settings = await getSecretarySettings();
+    const enabledSkills = settings.enabledSkills;
     
     // Validate that enabled skills still exist
     const availableNames = new Set(availableSkills.map(s => s.name));
-    const validEnabledSkills = enabledSkills.filter(name => availableNames.has(name));
+    let validEnabledSkills: string[];
     
-    // If some enabled skills were removed, update the stored list
-    if (validEnabledSkills.length !== enabledSkills.length) {
-      await setSecretaryEnabledSkills(validEnabledSkills);
-      console.log('[Secretary Skills API] Cleaned up invalid enabled skills');
+    if (!settings.skillsConfigured) {
+      // First time: default all non-app skills to enabled
+      validEnabledSkills = availableSkills.map(s => s.name);
+      // Persist the default and mark as configured
+      await updateSecretarySettings({ enabledSkills: validEnabledSkills, skillsConfigured: true });
+      console.log('[Secretary Skills API] First-time init: all non-app skills enabled by default');
+    } else {
+      validEnabledSkills = enabledSkills.filter(name => availableNames.has(name));
+      
+      // If some enabled skills were removed, update the stored list
+      if (validEnabledSkills.length !== enabledSkills.length) {
+        await setSecretaryEnabledSkills(validEnabledSkills);
+        console.log('[Secretary Skills API] Cleaned up invalid enabled skills');
+      }
     }
     
     return NextResponse.json({
@@ -81,13 +94,14 @@ export async function PUT(request: NextRequest) {
       );
     }
     
-    // Validate that all skills exist
+    // Validate that all skills exist (non-app skills only)
     const allSkills = await getAllSkills();
-    const availableNames = new Set(allSkills.filter(s => s.hasSkill).map(s => s.name));
+    const availableNames = new Set(allSkills.filter(s => s.hasSkill && !s.hasApp).map(s => s.name));
     const validSkills = enabledSkills.filter(name => availableNames.has(name));
     
-    // Update the settings
+    // Update the settings and mark as configured
     await setSecretaryEnabledSkills(validSkills);
+    await updateSecretarySettings({ skillsConfigured: true });
     
     console.log(`[Secretary Skills API] Updated enabled skills: ${validSkills.length} skill(s)`);
     

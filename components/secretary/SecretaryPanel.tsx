@@ -37,6 +37,7 @@ import {
   FolderOpen,
   FileIcon,
   MessageSquare,
+  RefreshCw,
 } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import type { Employee } from '@/types/backend/employee';
@@ -2626,23 +2627,24 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
   }, []);
 
   // Load skills
-  useEffect(() => {
-    async function fetchSkills() {
-      setLoadingSkills(true);
-      try {
-        const res = await fetch(`${API_BASE}/api/secretary/skills`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success) {
-            setAvailableSkills(data.availableSkills || []);
-            setEnabledSkills(data.enabledSkills || []);
-          }
+  const fetchSkills = useCallback(async () => {
+    setLoadingSkills(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/secretary/skills`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setAvailableSkills(data.availableSkills || []);
+          setEnabledSkills(data.enabledSkills || []);
         }
-      } catch { /* ignore */ }
-      setLoadingSkills(false);
-    }
-    fetchSkills();
+      }
+    } catch { /* ignore */ }
+    setLoadingSkills(false);
   }, []);
+
+  useEffect(() => {
+    fetchSkills();
+  }, [fetchSkills]);
 
   // Scheduled messages CRUD
   const handleSaveScheduled = async (msgs: SecretaryScheduledMessage[]) => {
@@ -3201,9 +3203,26 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
                     <Zap className="w-4 h-4 text-primary/70" />
                     <h3 className="text-[13px] font-semibold text-text-main">技能管理</h3>
                   </div>
-                  {savingSkills && (
-                    <span className="text-[10px] text-primary/60">保存中...</span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {savingSkills && (
+                      <span className="text-[10px] text-primary/60">保存中...</span>
+                    )}
+                    <button
+                      onClick={fetchSkills}
+                      disabled={loadingSkills}
+                      className="p-1 rounded-lg text-text-secondary/50 hover:text-primary hover:bg-white/20 dark:hover:bg-white/[0.04] transition-colors disabled:opacity-40"
+                      title="刷新技能列表"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingSkills ? 'animate-spin' : ''}`} />
+                    </button>
+                    <button
+                      onClick={() => onOpenSettings?.('skills-market')}
+                      className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      添加技能
+                    </button>
+                  </div>
                 </div>
                 <p className="text-[11px] text-text-secondary/50 mb-3">启用的技能将在AI回复时可用</p>
 
@@ -3222,9 +3241,6 @@ export default function SecretaryPanel({ onOpenSettings }: SecretaryPanelProps) 
                               <span className="text-[12px] font-medium text-text-main truncate">
                                 {skill.displayName || skill.name}
                               </span>
-                              {skill.hasApp && (
-                                <span className="text-[9px] px-1 py-0.5 bg-blue-500/10 text-blue-500 dark:text-blue-400 rounded">App</span>
-                              )}
                             </div>
                             <p className="text-[10px] text-text-secondary/50 truncate mt-0.5">
                               {skill.description}

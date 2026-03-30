@@ -3228,27 +3228,7 @@ const persistProjectPreferences = useCallback(
       <div className="h-screen flex items-center justify-center p-0 md:p-0 overflow-hidden">
       {/* Animated Background */}
       <AnimatedBackground bgUrl={bgUrl} bgCss={bgCss} />
-      <div className="glass flex h-full w-full max-w-[1600px] rounded-none md:rounded-2xl shadow-2xl overflow-hidden relative">
-        {/* App Sidebar */}
-        <AppSidebar
-          currentPage={sidebarActiveItem}
-          theme={theme}
-          mounted={mounted}
-          onToggleTheme={toggleTheme}
-          onNavigate={(page) => {
-            if (page === 'settings') {
-              setShowGlobalSettings(true);
-            } else if (page === 'home') {
-              router.push('/workspace');
-            } else if (page === 'apps') {
-              router.push('/workspace?view=apps');
-            } else if (page === 'templates') {
-              router.push('/workspace?view=templates');
-            } else {
-              router.push(`/workspace?view=${page}`);
-            }
-          }}
-        />
+      <div className="glass flex h-full w-full rounded-none shadow-2xl overflow-hidden relative">
 
         <div className="h-[calc(100%-16px)] flex-1 flex min-w-0 overflow-hidden relative glass-card m-2 rounded-2xl">
           {/* Mobile view toggle - fixed at top, always visible */}

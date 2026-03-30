@@ -15,6 +15,7 @@ import path from 'path';
 
 export interface SecretarySettings {
   enabledSkills: string[];
+  skillsConfigured?: boolean; // true after user has explicitly configured skills
   // Future extensibility: additional settings can be added here
 }
 
