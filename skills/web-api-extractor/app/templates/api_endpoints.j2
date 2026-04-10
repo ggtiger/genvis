@@ -1,0 +1,49 @@
+{
+  "skillName": "{{ skill_name }}",
+  "displayName": "{{ skill_display_name }}",
+  "description": "{{ skill_description }}",
+  "auth": {
+    "authType": "none"
+  },
+  "endpoints": [
+    {
+      "path": "/health",
+      "method": "GET",
+      "summary": "健康检查",
+      "description": "检查服务运行状态",
+      "parameters": [],
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "service": { "type": "string" }
+        }
+      }
+    }{% if apis %},{% endif %}
+
+    {% for api in apis %}
+    {
+      "path": "/{{ api.function_name }}",
+      "method": "{{ api.method | upper }}",
+      "summary": "{{ api.display_name }}",
+      "description": "{{ api.description }}",
+      "parameters": [
+        {% for param in api.parameters %}
+        {
+          "name": "{{ param.name }}",
+          "type": "{{ param.type }}",
+          "required": {{ param.required | lower }},
+          "description": "{{ param.description }}",
+          "location": "{{ param.location }}"{% if param.example is not none %},
+          "example": {{ param.example | tojson }}{% endif %}
+        }{% if not loop.last %},{% endif %}
+
+        {% endfor %}
+      ],
+      "tags": ["{{ api.category }}"],
+      "originalUrl": "{{ api.original_url }}"
+    }{% if not loop.last %},{% endif %}
+
+    {% endfor %}
+  ]
+}

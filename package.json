@@ -10,7 +10,7 @@
     "dev:desktop": "npm run type-check && node scripts/run-desktop.js",
     "dev:electron": "npm run dev:desktop",
     "ensure:env": "node scripts/setup-env.js",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next build",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 next build",
     "prebuild:skills": "node scripts/prebuild-skills.js",
     "clean:nonprebuilt-skills": "node scripts/clean-nonprebuilt-skills.js",
     "start": "next start",
@@ -34,6 +34,7 @@
     "adm-zip": "^0.5.16",
     "better-sqlite3": "^12.5.0",
     "bufferutil": "^4.1.0",
+    "cheerio": "^1.2.0",
     "dingtalk-stream-sdk-nodejs": "^2.0.4",
     "docx": "^9.5.1",
     "dotenv": "^16.4.5",
@@ -168,6 +169,7 @@
           "!node-runtime/**",
           "!.git/**",
           "!python-runtime/**",
+          "!skillhub-cli/**",
           "!skills/**",
           "!data/projects/**/logs/**",
           "!data/projects/**/node_modules/**",
@@ -290,6 +292,13 @@
           "filter": [
             "**/*"
           ]
+        },
+        {
+          "from": "skillhub-cli/darwin-${arch}",
+          "to": "skillhub-cli/darwin-${arch}",
+          "filter": [
+            "**/*"
+          ]
         }
       ]
     },
@@ -326,6 +335,13 @@
         {
           "from": "git-runtime/win32-x64",
           "to": "git-runtime/win32-x64",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "skillhub-cli/win32-x64",
+          "to": "skillhub-cli/win32-x64",
           "filter": [
             "**/*"
           ]

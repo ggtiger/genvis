@@ -1,0 +1,11 @@
+{
+  "displayName": "portal-log-api-skill",
+  "description": "",
+  "category": "Web API",
+  "tags": ["portal-log-api-skill", "web-api", "auto-generated"],
+  "version": "1.0.0",
+  "author": "Web API Extractor",
+  "projectType": "python-fastapi",
+  "sourceUrl": "https://www.gujing.cn/r/w?sid=41aa34f3-33f8-49d8-a637-31bcd52c39ef&cmd=com.awspaas.user.apps.gujingdaylog_home",
+  "generatedAt": "2026-03-30T16:56:36Z"
+}

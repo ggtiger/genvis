@@ -1,0 +1,61 @@
+---
+name: {{ skill_name }}
+displayName: {{ skill_display_name }}
+description: {{ skill_description }}
+projectType: python-fastapi
+version: 1.0.0
+author: Genvis Web API Extractor
+source_url: {{ source_url }}
+generated_at: {{ generated_at }}
+---
+
+# {{ skill_display_name }}
+
+## 简介
+
+{{ skill_description }}
+
+> 本 Skill 由 [Genvis Web API 抓取器](https://genvis.ai) 自动生成，源网站：{{ source_url }}
+
+## API 接口列表
+
+共封装 **{{ apis | length }}** 个接口：
+
+{% for api in apis %}
+### {{ loop.index }}. {{ api.display_name }}
+
+- **路由**: `{{ api.method | upper }} /{{ api.function_name }}`
+- **原始地址**: `{{ api.original_url }}`
+- **描述**: {{ api.description }}
+{% if api.parameters %}
+- **参数**:
+
+| 参数名 | 类型 | 必填 | 位置 | 说明 |
+|--------|------|------|------|------|
+{% for param in api.parameters %}
+| `{{ param.name }}` | {{ param.type }} | {{ "是" if param.required else "否" }} | {{ param.location }} | {{ param.description }} |
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+## 配置说明
+
+### 修改 Cookie / 认证信息
+
+生成的服务使用环境变量 `API_COOKIES` 传入 Cookie：
+
+```bash
+export API_COOKIES="your_cookie_string_here"
+```
+
+也可以直接修改 `app/main.py` 中的 `DEFAULT_COOKIES` 变量。
+
+## 启动方式
+
+```bash
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+访问 `http://localhost:8000/docs` 查看 Swagger 文档。

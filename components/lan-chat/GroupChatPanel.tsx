@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { ArrowUp, Users, Trash2, Save, Settings, Zap, FolderOpen, X, Square, UserPlus, UserMinus, Download, Pencil, Check, Clock, Plus, Minus, Play, Bot, LogOut } from 'lucide-react';
+import { ArrowUp, Users, Trash2, Save, Settings, Zap, FolderOpen, X, Square, UserPlus, UserMinus, Download, Pencil, Check, Clock, Plus, Minus, Play, Bot, LogOut, Paperclip, Mic, MicOff, FileText } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import ChatMessageBubble from './ChatMessageBubble';
+import ChatMessageBubble, { ImagePreviewOverlay } from './ChatMessageBubble';
 import FileGridView, { type FileItem } from '@/components/files/FileGridView';
 import PreviewDialog from '@/components/preview/PreviewDialog';
 import type { ChatGroup, ChatMessage, PeerInfo, ScheduledMessage } from '@/lib/services/lan-peer/types';
@@ -60,6 +60,23 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
   const [allSkills, setAllSkills] = useState<{ name: string; displayName?: string; enabled: boolean }[]>([]);
   const [editingSkills, setEditingSkills] = useState<string[]>(group.enabledSkills || []);
   const [savingSkills, setSavingSkills] = useState(false);
+
+  // Attachment state
+  const [attachments, setAttachments] = useState<Array<{
+    id: string; name: string; mimeType: string; size: number;
+    publicUrl?: string | null; base64?: string; absolutePath?: string; uploading?: boolean;
+  }>>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isComposing, setIsComposing] = useState(false);
+
+  // Voice input state
+  const [isListening, setIsListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  // Conversation stats
+  const [conversationStats, setConversationStats] = useState<any>(null);
+  const conversationStatsRef = useRef<any>(null);
 
   const fetchAllSkills = useCallback(async () => {
     try {
@@ -179,6 +196,140 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
     document.body.removeChild(link);
   }, [group.id]);
 
+  // Check browser speech recognition support
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setVoiceSupported(!!SR);
+  }, []);
+
+  // Cleanup recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
+
+  // Voice input toggle
+  const toggleVoiceInput = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SR();
+    recognition.lang = 'zh-CN';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.maxAlternatives = 1;
+
+    let finalTranscript = '';
+
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interim = transcript;
+        }
+      }
+      setInputValue(finalTranscript + (interim ? interim : ''));
+    };
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      finalTranscript = inputValue;
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.onerror = (event: any) => {
+      console.warn('[Voice] Recognition error:', event.error);
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [isListening, inputValue]);
+
+  // Upload a file
+  const uploadFile = useCallback(async (file: File) => {
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const placeholder = {
+      id: tempId,
+      name: file.name,
+      mimeType: file.type,
+      size: file.size,
+      uploading: true,
+      base64: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+    };
+    setAttachments((prev) => [...prev, placeholder]);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE}/api/assets/secretary/upload`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success) {
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.id === tempId
+              ? { ...a, id: data.filename, publicUrl: data.publicUrl, base64: data.base64 || a.base64, absolutePath: data.absolutePath, uploading: false }
+              : a
+          )
+        );
+      } else {
+        setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+      }
+    } catch {
+      setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+    }
+  }, []);
+
+  const handleFileSelect = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((f) => uploadFile(f));
+    e.target.value = '';
+  }, [uploadFile]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  // Handle paste for images from clipboard
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          const name = `clipboard-${Date.now()}.${file.type.split('/')[1] || 'png'}`;
+          const renamedFile = new File([file], name, { type: file.type });
+          uploadFile(renamedFile);
+        }
+        return;
+      }
+    }
+  }, [uploadFile]);
+
   const PAGE_SIZE = 50;
 
   const loadMessages = useCallback(async (replace = false) => {
@@ -284,8 +435,17 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
           });
         }
 
+        // Conversation stats
+        if (data.type === 'conversation_stats') {
+          const stats = data.data || null;
+          setConversationStats(stats);
+          conversationStatsRef.current = stats;
+        }
+
         // AI streaming start (also sent on SSE reconnect if AI is still active)
         if (data.type === 'ai_stream_start' && data.data?.groupId === group.id) {
+          setConversationStats(null);
+          conversationStatsRef.current = null;
           // Track who triggered this stream
           setStreamingSenderId(data.data.senderId || null);
           // On reconnect (resumed=true), also refresh messages to catch any we missed
@@ -336,6 +496,7 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
                   interactionMode: 'ai_chat',
                   timestamp: Date.now(),
                   status: 'sent',
+                  metadata: conversationStatsRef.current ? { conversationStats: conversationStatsRef.current } : undefined,
                 }];
               });
             }
@@ -466,14 +627,28 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
 
   const handleSend = async () => {
     const content = inputValue.trim();
-    if (!content || sending) return;
+    if ((!content && attachments.length === 0) || sending) return;
+    if (attachments.some((a) => a.uploading)) return;
     setSending(true);
     setInputValue('');
+    const currentAttachments = [...attachments];
+    setAttachments([]);
+
+    // Build attachment info for the message
+    let messageContent = content;
+    if (currentAttachments.length > 0) {
+      const fileInfo = currentAttachments.map((a) => {
+        const filePath = a.absolutePath || a.publicUrl || a.name;
+        return `- ${a.name} (${a.mimeType}, ${(a.size / 1024).toFixed(1)}KB)\n  路径: ${filePath}`;
+      }).join('\n');
+      messageContent += `\n\n[附件]\n${fileInfo}`;
+    }
+
     try {
       const res = await fetch(`${API_BASE}/api/lan-peer/groups/${group.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content: messageContent }),
       });
       const result = await res.json();
       // Optimistic update: add message from POST response immediately
@@ -489,7 +664,7 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -724,35 +899,88 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
 
           {/* Input */}
           <div className="px-5 py-3">
-            <div className="flex items-end gap-2 bg-white/50 dark:bg-white/[0.04] rounded-2xl border border-white/30 dark:border-white/[0.06] p-2 shadow-sm backdrop-blur-sm focus-within:ring-1 focus-within:ring-primary/20 transition-shadow">
+            <div className="bg-white/50 dark:bg-white/[0.04] rounded-2xl border border-white/30 dark:border-white/[0.06] p-2 shadow-sm backdrop-blur-sm focus-within:ring-1 focus-within:ring-primary/20 transition-shadow">
+              {/* Attachment preview strip */}
+              {attachments.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-2 pt-1 pb-2">
+                  {attachments.map((att) => (
+                    <div key={att.id} className="relative group flex items-center gap-1.5 px-2 py-1.5 bg-white/30 dark:bg-white/5 border border-white/20 dark:border-white/[0.06] rounded-lg text-xs">
+                      {att.mimeType.startsWith('image/') && att.base64 ? (
+                        <img src={att.base64} alt={att.name} className="w-8 h-8 rounded object-cover" />
+                      ) : (
+                        <FileText className="w-4 h-4 text-text-secondary" />
+                      )}
+                      <span className="text-text-main max-w-[120px] truncate">{att.name}</span>
+                      {att.uploading && <span className="text-text-secondary animate-pulse">上传中...</span>}
+                      <button
+                        onClick={() => removeAttachment(att.id)}
+                        className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-gray-300 dark:bg-gray-600 text-white hover:bg-red-500 transition-colors"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileInputChange}
+                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.json,.zip"
+              />
               <textarea
                 ref={textareaRef}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isMyStream ? 'AI 正在响应中，请等待或终止...' : (group.enabledSkills.length > 0 ? '输入消息（直接发送触发技能，@同事 或 #纯聊天）' : '输入消息...')}
+                onPaste={handlePaste}
+                onCompositionStart={() => setIsComposing(true)}
+                onCompositionEnd={() => setIsComposing(false)}
+                placeholder={isMyStream ? 'AI 正在响应中，请等待或终止...' : (group.enabledSkills.length > 0 ? '输入消息（直接发送触发技能，@同事 或 #纯聊天）' : '输入消息... 可粘贴图片或添加附件')}
                 rows={1}
                 disabled={!!isMyStream}
-                className="flex-1 resize-none bg-transparent text-sm text-text-main placeholder:text-text-secondary/40 focus:outline-none px-2 py-1.5 max-h-32 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full resize-none bg-transparent text-sm text-text-main placeholder:text-text-secondary/40 focus:outline-none px-2 py-1.5 max-h-32 disabled:opacity-40 disabled:cursor-not-allowed"
               />
-              {isMyStream ? (
-                <button
-                  onClick={handleAbort}
-                  disabled={aborting}
-                  className="p-2 rounded-xl bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-all shrink-0 shadow-sm flex items-center gap-1"
-                  title="终止AI响应"
-                >
-                  <Square className="w-4 h-4" />
-                </button>
-              ) : (
-                <button
-                  onClick={handleSend}
-                  disabled={!inputValue.trim() || sending || !!streamingMessage}
-                  className="p-2 rounded-xl bg-primary text-white hover:bg-primary/90 disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0 shadow-sm"
-                >
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-              )}
+              <div className="flex justify-between items-center px-1 pt-1">
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={handleFileSelect} className="p-1.5 text-text-secondary/60 hover:text-primary hover:bg-white/30 dark:hover:bg-white/[0.06] rounded-lg transition-colors" title="添加附件">
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleVoiceInput}
+                    disabled={!voiceSupported}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      isListening
+                        ? 'text-red-500 bg-red-500/10 animate-pulse'
+                        : 'text-text-secondary/60 hover:text-primary hover:bg-white/30 dark:hover:bg-white/[0.06]'
+                    } disabled:opacity-30 disabled:cursor-not-allowed`}
+                    title={isListening ? '停止语音输入' : '语音输入'}
+                  >
+                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  </button>
+                </div>
+                {isMyStream ? (
+                  <button
+                    onClick={handleAbort}
+                    disabled={aborting}
+                    className="p-2 rounded-xl bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-all shrink-0 shadow-sm flex items-center gap-1"
+                    title="终止AI响应"
+                  >
+                    <Square className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSend}
+                    disabled={(!inputValue.trim() && attachments.length === 0) || sending || !!streamingMessage || attachments.some(a => a.uploading)}
+                    className="p-2 rounded-xl bg-primary text-white hover:bg-primary/90 disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0 shadow-sm"
+                  >
+                    <ArrowUp className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
             {group.enabledSkills.length > 0 && (
               <p className="text-[10px] text-text-secondary/40 mt-1.5 px-2">
@@ -1294,6 +1522,9 @@ export default function GroupChatPanel({ group, peers, selfInfo, onDeleteGroup, 
           </div>
         </div>
       )}
+
+      {/* Image Preview Overlay for ChatMessageBubble inline images */}
+      <ImagePreviewOverlay />
     </div>
   );
 }

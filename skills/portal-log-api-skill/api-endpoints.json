@@ -1,0 +1,128 @@
+{
+  "skillName": "portal-log-api-skill",
+  "displayName": "portal-log-api-skill",
+  "description": "",
+  "auth": {
+    "authType": "none"
+  },
+  "endpoints": [
+    {
+      "path": "/health",
+      "method": "GET",
+      "summary": "健康检查",
+      "description": "检查服务运行状态",
+      "parameters": [],
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "service": { "type": "string" }
+        }
+      }
+    },
+    {
+      "path": "/querylog",
+      "method": "POST",
+      "summary": "查询日志",
+      "description": "调用 POST /r/jd?cmd=com.awspaas.user.apps.gujingdaylog_querylog",
+      "parameters": [
+        {
+          "name": "sid",
+          "type": "string",
+          "required": false,
+          "description": "sid",
+          "location": "query",
+          "example": "41aa34f3-33f8-49d8-a637-31bcd52c39ef"        },
+        {
+          "name": "cmd",
+          "type": "string",
+          "required": false,
+          "description": "cmd",
+          "location": "query",
+          "example": "com.awspaas.user.apps.gujingdaylog_querylog"        },
+        {
+          "name": "creators",
+          "type": "string",
+          "required": false,
+          "description": "creators",
+          "location": "body",
+          "example": "wanghu1"        },
+        {
+          "name": "startDate",
+          "type": "string",
+          "required": false,
+          "description": "startDate",
+          "location": "body",
+          "example": "2026-03-31"        },
+        {
+          "name": "endDate",
+          "type": "string",
+          "required": false,
+          "description": "endDate",
+          "location": "body",
+          "example": "2026-03-31"        }
+      ],
+      "tags": ["default"],
+      "originalUrl": "https://www.gujing.cn/r/jd?sid=41aa34f3-33f8-49d8-a637-31bcd52c39ef&cmd=com.awspaas.user.apps.gujingdaylog_querylog"
+    },
+    {
+      "path": "/log",
+      "method": "POST",
+      "summary": "log",
+      "description": "调用 POST /r/jd?cmd=com.awspaas.user.apps.gujingdaylog_save_log",
+      "parameters": [
+        {
+          "name": "sid",
+          "type": "string",
+          "required": false,
+          "description": "sid",
+          "location": "query",
+          "example": "41aa34f3-33f8-49d8-a637-31bcd52c39ef"        },
+        {
+          "name": "cmd",
+          "type": "string",
+          "required": false,
+          "description": "cmd",
+          "location": "query",
+          "example": "com.awspaas.user.apps.gujingdaylog_save_log"        },
+        {
+          "name": "logId",
+          "type": "string",
+          "required": false,
+          "description": "logId",
+          "location": "body",
+          "example": "22df722c-bfe0-4536-ab09-38222600b93f"        },
+        {
+          "name": "logDate",
+          "type": "string",
+          "required": false,
+          "description": "logDate",
+          "location": "body",
+          "example": "2026-03-31"        },
+        {
+          "name": "logLocation",
+          "type": "string",
+          "required": false,
+          "description": "logLocation",
+          "location": "body",
+          "example": "亳州市"        },
+        {
+          "name": "logContent",
+          "type": "string",
+          "required": false,
+          "description": "logContent",
+          "location": "body",
+          "example": "测试11"        },
+        {
+          "name": "isDel",
+          "type": "string",
+          "required": false,
+          "description": "isDel",
+          "location": "body",
+          "example": "0"        }
+      ],
+      "tags": ["default"],
+      "originalUrl": "https://www.gujing.cn/r/jd?sid=41aa34f3-33f8-49d8-a637-31bcd52c39ef&cmd=com.awspaas.user.apps.gujingdaylog_save_log"
+    }
+  ]
+}

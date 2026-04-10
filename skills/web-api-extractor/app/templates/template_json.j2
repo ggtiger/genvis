@@ -1,0 +1,11 @@
+{
+  "displayName": "{{ skill_display_name }}",
+  "description": "{{ skill_description }}",
+  "category": "{{ category | default('Web API') }}",
+  "tags": [{{ tags | map('tojson') | join(', ') }}],
+  "version": "{{ version | default('1.0.0') }}",
+  "author": "{{ author | default('Genvis Web API Extractor') }}",
+  "projectType": "python-fastapi",
+  "sourceUrl": "{{ source_url }}",
+  "generatedAt": "{{ generated_at }}"
+}

@@ -3465,7 +3465,8 @@ const ToolResultMessage = ({
 
       {/* Display messages and logs together */}
       <div
-        className="flex-1 overflow-y-auto px-8 py-3 space-y-2 custom-scrollbar "
+        className="flex-1 overflow-y-auto px-8 py-3 space-y-2 custom-scrollbar will-change-scroll"
+        style={{ contain: 'content', overscrollBehavior: 'contain' }}
         onScroll={(e) => {
           const el = e.currentTarget;
           if (el.scrollTop < 80 && hasMoreMessages && !isLoading) {

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "skills": {
+    "tencent-docs": {
+      "name": "腾讯文档 tencent-docs",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=tencent-docs",
+      "source": "skillhub",
+      "version": "1.0.13"
+    },
+    "summarize": {
+      "name": "Summarize",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=summarize",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "star-office-ui": {
+      "name": "Star Office UI",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=star-office-ui",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "obsidian": {
+      "name": "Obsidian",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=obsidian",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "tencentcloud-tts": {
+      "name": "TencentCloud TTS",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=tencentcloud-tts",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "tencentcloud-asr": {
+      "name": "TencentCloud ASR",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=tencentcloud-asr",
+      "source": "skillhub",
+      "version": "0.1.5"
+    },
+    "find-skills": {
+      "name": "Find Skills",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=find-skills",
+      "source": "skillhub",
+      "version": "0.1.0"
+    },
+    "obsidian-tasks": {
+      "name": "Obsidian Tasks",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=obsidian-tasks",
+      "source": "skillhub",
+      "version": "0.1.2"
+    }
+  }
+}

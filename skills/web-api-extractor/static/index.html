@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Web API 抓取器</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ── 顶栏 ── */
+  .topbar {
+    background: #181825;
+    border-bottom: 1px solid #313244;
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .topbar-icon { font-size: 22px; }
+  .topbar-title { font-size: 18px; font-weight: 700; color: #cdd6f4; }
+  .topbar-sub { font-size: 12px; color: #6c7086; margin-left: 4px; }
+
+  /* ── 主容器 ── */
+  .container { max-width: 1200px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  /* ── 步骤卡片 ── */
+  .step-card {
+    background: #2a2a3e;
+    border: 1px solid #313244;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    overflow: hidden;
+    transition: border-color .2s;
+  }
+  .step-card.active { border-color: #6366f1; }
+
+  .step-header {
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .step-badge {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: #313244;
+    color: #6c7086;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+    flex-shrink: 0;
+    transition: background .2s, color .2s;
+  }
+  .step-card.active .step-badge { background: #6366f1; color: #fff; }
+  .step-card.done .step-badge { background: #a6e3a1; color: #1e1e2e; }
+  .step-title { font-size: 15px; font-weight: 600; flex: 1; }
+  .step-arrow { color: #6c7086; font-size: 12px; transition: transform .2s; }
+  .step-card.open .step-arrow { transform: rotate(180deg); }
+
+  .step-body {
+    display: none;
+    padding: 0 20px 20px;
+    border-top: 1px solid #313244;
+  }
+  .step-card.open .step-body { display: block; }
+
+  /* ── 表单元素 ── */
+  label { display: block; font-size: 12px; color: #a6adc8; margin-bottom: 6px; font-weight: 500; }
+  .form-group { margin-top: 16px; }
+
+  input[type="text"], input[type="url"], textarea, select {
+    width: 100%;
+    background: #181825;
+    border: 1px solid #313244;
+    border-radius: 8px;
+    color: #cdd6f4;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color .2s;
+  }
+  input:focus, textarea:focus { border-color: #6366f1; }
+  textarea { resize: vertical; min-height: 70px; }
+
+  /* 滑块 */
+  .slider-row { display: flex; align-items: center; gap: 12px; }
+  input[type="range"] {
+    flex: 1;
+    accent-color: #6366f1;
+    height: 4px;
+    cursor: pointer;
+  }
+  .slider-val {
+    background: #313244; border-radius: 6px;
+    padding: 2px 8px; font-size: 12px; color: #cdd6f4; min-width: 46px; text-align: center;
+  }
+
+  /* Toggle */
+  .toggle-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .toggle-label { font-size: 13px; color: #cdd6f4; }
+  .toggle {
+    position: relative; width: 38px; height: 22px;
+    display: inline-block;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0;
+    background: #313244; border-radius: 22px;
+    cursor: pointer; transition: .2s;
+  }
+  .toggle-slider::before {
+    content: ''; position: absolute;
+    width: 16px; height: 16px;
+    left: 3px; top: 3px;
+    background: #6c7086; border-radius: 50%;
+    transition: .2s;
+  }
+  .toggle input:checked + .toggle-slider { background: #6366f1; }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: #fff; }
+
+  /* ── 按钮 ── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 9px 20px; border-radius: 8px; border: none;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: opacity .15s, transform .1s;
+    text-decoration: none;
+  }
+  .btn:hover { opacity: .88; }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+  .btn-primary { background: #6366f1; color: #fff; }
+  .btn-secondary { background: #313244; color: #cdd6f4; }
+  .btn-success { background: #a6e3a1; color: #1e1e2e; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+  /* ── Loading ── */
+  .loading-wrap {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 0; color: #a6adc8; font-size: 13px;
+  }
+  .spinner {
+    width: 18px; height: 18px; border: 2px solid #313244;
+    border-top-color: #6366f1; border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── 表格 ── */
+  .api-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+  .api-table th {
+    background: #181825; color: #a6adc8; font-weight: 600;
+    padding: 8px 12px; text-align: left;
+    border-bottom: 1px solid #313244;
+  }
+  .api-table td {
+    padding: 8px 12px; border-bottom: 1px solid #1e1e2e;
+    vertical-align: middle;
+  }
+  .api-table tr:hover td { background: #1e1e2e40; }
+  .api-table input[type="checkbox"] {
+    width: 15px; height: 15px; accent-color: #6366f1; cursor: pointer;
+  }
+
+  /* Method 标签 */
+  .method-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 700; letter-spacing: .5px;
+  }
+  .method-GET    { background: #a6e3a120; color: #a6e3a1; border: 1px solid #a6e3a140; }
+  .method-POST   { background: #89b4fa20; color: #89b4fa; border: 1px solid #89b4fa40; }
+  .method-PUT    { background: #fab38720; color: #fab387; border: 1px solid #fab38740; }
+  .method-DELETE { background: #f3838720; color: #f38387; border: 1px solid #f3838740; }
+  .method-PATCH  { background: #cba6f720; color: #cba6f7; border: 1px solid #cba6f740; }
+
+  /* API 计数栏 */
+  .api-summary { margin-top: 12px; display: flex; align-items: center; gap: 12px; color: #a6adc8; font-size: 13px; }
+  .api-summary .count { color: #6366f1; font-weight: 700; }
+
+  /* ── AI 分析卡片 ── */
+  .analyzed-card {
+    background: #181825; border: 1px solid #313244; border-radius: 10px;
+    padding: 16px; margin-top: 14px;
+  }
+  .analyzed-card-title {
+    font-size: 13px; color: #a6adc8; font-weight: 600; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .category-badge {
+    display: inline-block; padding: 1px 8px; border-radius: 20px;
+    background: #6366f120; color: #6366f1; border: 1px solid #6366f140;
+    font-size: 11px; font-weight: 600;
+  }
+  .params-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  .params-table th { color: #6c7086; font-weight: 600; padding: 4px 8px; text-align: left; }
+  .params-table td { padding: 4px 8px; color: #a6adc8; }
+  .params-table tr:not(:last-child) td { border-bottom: 1px solid #313244; }
+  .loc-badge {
+    display: inline-block; padding: 0 6px; border-radius: 4px;
+    background: #313244; color: #a6adc8; font-size: 11px;
+  }
+
+  /* ── Skill 配置区 ── */
+  .skill-config {
+    background: #181825; border: 1px solid #313244;
+    border-radius: 10px; padding: 16px; margin-top: 20px;
+  }
+  .skill-config-title { font-size: 13px; font-weight: 700; color: #cdd6f4; margin-bottom: 14px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  /* ── Code 预览 Tabs ── */
+  .tabs { display: flex; gap: 4px; margin-top: 16px; flex-wrap: wrap; }
+  .tab-btn {
+    padding: 5px 14px; border-radius: 6px 6px 0 0;
+    background: #181825; border: 1px solid #313244; border-bottom: none;
+    color: #6c7086; font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .tab-btn.active { background: #2a2a3e; color: #6366f1; border-color: #6366f1; }
+  .code-preview {
+    background: #181825; border: 1px solid #313244; border-radius: 0 8px 8px 8px;
+    padding: 16px; overflow: auto; max-height: 420px;
+  }
+  .code-preview pre {
+    margin: 0; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 12px; line-height: 1.6; color: #a6e3a1; white-space: pre; tab-size: 2;
+  }
+
+  /* ── 发布结果 ── */
+  .publish-result {
+    background: #a6e3a110; border: 1px solid #a6e3a140;
+    border-radius: 10px; padding: 16px; margin-top: 16px;
+  }
+  .publish-result .title { font-size: 15px; font-weight: 700; color: #a6e3a1; margin-bottom: 10px; }
+  .publish-result .info-row { display: flex; gap: 8px; font-size: 13px; margin-top: 6px; color: #a6adc8; }
+  .publish-result .info-val { color: #cdd6f4; word-break: break-all; }
+
+  /* 截图预览 */
+  .screenshot-preview {
+    margin-bottom: 16px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #313244;
+  }
+  .screenshot-preview img {
+    max-width: 100%;
+    max-height: 400px;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto;
+    background: #11111b;
+  }
+  .screenshot-preview .meta {
+    padding: 8px 12px;
+    background: #181825;
+    font-size: 13px;
+    color: #a6adc8;
+  }
+  .screenshot-preview .meta strong { color: #cdd6f4; }
+
+  /* 页面元素标签 */
+  .element-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 12px;
+  }
+  .element-tag {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    cursor: default;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .element-tag.button { background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99,102,241,0.3); }
+  .element-tag.input  { background: rgba(166, 227, 161, 0.15); color: #a6e3a1; border: 1px solid rgba(166,227,161,0.25); }
+  .element-tag.link   { background: rgba(203, 166, 247, 0.15); color: #cba6f7; border: 1px solid rgba(203,166,247,0.25); }
+  .element-tag.other  { background: rgba(166, 173, 200, 0.1); color: #a6adc8; border: 1px solid rgba(166,173,200,0.15); }
+
+  /* 可折叠区域 */
+  .collapsible-section { margin-bottom: 12px; }
+  .collapsible-header {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: #181825;
+    border-radius: 6px;
+    border: 1px solid #313244;
+    margin-bottom: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #cdd6f4;
+    user-select: none;
+  }
+  .collapsible-header:hover { background: #1e1e2e; }
+  .collapsible-header .arrow { transition: transform 0.2s; font-size: 10px; color: #6c7086; }
+  .collapsible-header.open .arrow { transform: rotate(90deg); }
+  .collapsible-body {
+    display: none;
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+  }
+  .collapsible-body.open { display: block; }
+
+  /* 来源标签 */
+  .source-badge {
+    display: inline-block; padding: 1px 7px; border-radius: 20px;
+    font-size: 11px; font-weight: 600; margin-left: 6px;
+  }
+  .source-badge.captured { background: rgba(166,227,161,0.15); color: #a6e3a1; border: 1px solid rgba(166,227,161,0.3); }
+  .source-badge.visual   { background: rgba(137,180,250,0.15); color: #89b4fa; border: 1px solid rgba(137,180,250,0.3); }
+
+  /* ── Toast ── */
+  #toast-container {
+    position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+  }
+  .toast {
+    background: #2a2a3e; border: 1px solid #313244; border-radius: 10px;
+    padding: 12px 16px; font-size: 13px; color: #cdd6f4;
+    box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    animation: slideIn .2s ease; max-width: 380px;
+  }
+  .toast.error { border-color: #f38387; color: #f38387; }
+  .toast.success { border-color: #a6e3a1; color: #a6e3a1; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="topbar-icon">🕸️</span>
+  <span class="topbar-title">Web API 抓取器</span>
+  <span class="topbar-sub">自动从网页捕获 API 并生成 Skill</span>
+</div>
+
+<div class="container">
+
+  <!-- ══ Step 1 ══ -->
+  <div class="step-card active open" id="step1">
+    <div class="step-header" onclick="toggleStep('step1')">
+      <div class="step-badge">1</div>
+      <span class="step-title">页面分析</span>
+      <span class="step-arrow">▼</span>
+    </div>
+    <div class="step-body">
+      <div class="form-group">
+        <label>目标页面 URL *</label>
+        <input type="url" id="inp-url" placeholder="https://example.com/dashboard" />
+      </div>
+      <div class="form-group">
+        <label>Cookie（可选，格式：key1=val1; key2=val2）</label>
+        <textarea id="inp-cookies" placeholder="sessionid=abc123; csrftoken=xyz..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>采集等待时间</label>
+        <div class="slider-row">
+          <input type="range" id="inp-wait" min="3" max="60" value="10"
+                 oninput="document.getElementById('wait-val').textContent=this.value+'s'" />
+          <span class="slider-val" id="wait-val">10s</span>
+        </div>
+      </div>
+      <div class="toggle-row">
+        <label class="toggle">
+          <input type="checkbox" id="inp-scroll" checked />
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">自动滚动页面触发懒加载</span>
+      </div>
+      <div class="toggle-row">
+        <label class="toggle">
+          <input type="checkbox" id="captureScreenshot" checked />
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">页面截图</span>
+      </div>
+      <div class="toggle-row">
+        <label class="toggle">
+          <input type="checkbox" id="detectElements" checked />
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">元素检测</span>
+      </div>
+      <div class="form-group" style="margin-top:20px">
+        <button class="btn btn-primary" id="btn-analyze" onclick="doAnalyze()">
+          <span>🔍</span> 开始分析
+        </button>
+      </div>
+      <div id="analyze-loading" style="display:none">
+        <div class="loading-wrap"><div class="spinner"></div>正在启动浏览器并抓取 API，请稍候...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Step 2 ══ -->
+  <div class="step-card" id="step2">
+    <div class="step-header" onclick="toggleStep('step2')">
+      <div class="step-badge">2</div>
+      <span class="step-title">API 列表</span>
+      <span class="step-arrow">▼</span>
+    </div>
+    <div class="step-body">
+      <!-- 截图预览区域 -->
+      <div id="screenshot-section" class="collapsible-section" style="display:none;margin-top:12px">
+        <div class="collapsible-header" id="screenshot-header" onclick="toggleCollapsible('screenshot-header','screenshot-body')">
+          <span class="arrow">▶</span>
+          <span>📸 页面截图预览</span>
+        </div>
+        <div class="collapsible-body" id="screenshot-body">
+          <div class="screenshot-preview">
+            <img id="screenshot-img" src="" alt="页面截图" />
+            <div class="meta" id="screenshot-meta"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 页面元素区域 -->
+      <div id="elements-section" class="collapsible-section" style="display:none">
+        <div class="collapsible-header" id="elements-header" onclick="toggleCollapsible('elements-header','elements-body')">
+          <span class="arrow">▶</span>
+          <span id="elements-title">🔍 检测到的页面元素</span>
+        </div>
+        <div class="collapsible-body" id="elements-body">
+          <div class="element-tags" id="element-tags-container"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn btn-secondary btn-sm" onclick="selectAll(true)">全选</button>
+        <button class="btn btn-secondary btn-sm" onclick="selectAll(false)">取消全选</button>
+      </div>
+      <table class="api-table" id="api-table">
+        <thead>
+          <tr>
+            <th style="width:36px"></th>
+            <th style="width:72px">Method</th>
+            <th>Path</th>
+            <th style="width:70px">状态码</th>
+            <th>Content-Type</th>
+          </tr>
+        </thead>
+        <tbody id="api-tbody"></tbody>
+      </table>
+      <div class="api-summary">
+        共捕获 <span class="count" id="total-count">0</span> 个 API，已选择
+        <span class="count" id="sel-count">0</span> 个
+      </div>
+      <div style="margin-top:16px">
+        <button class="btn btn-primary" id="btn-ai" onclick="doAiAnalyze()">
+          <span>🤖</span> AI 分析选中项
+        </button>
+      </div>
+      <div id="ai-loading" style="display:none">
+        <div class="loading-wrap"><div class="spinner"></div>AI 正在语义分析接口，请稍候...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Step 3 ══ -->
+  <div class="step-card" id="step3">
+    <div class="step-header" onclick="toggleStep('step3')">
+      <div class="step-badge">3</div>
+      <span class="step-title">AI 分析结果</span>
+      <span class="step-arrow">▼</span>
+    </div>
+    <div class="step-body">
+      <div id="analyzed-list"></div>
+
+      <div class="skill-config">
+        <div class="skill-config-title">⚙️ Skill 配置</div>
+        <div class="grid-2">
+          <div>
+            <label>Skill 名称 *（英文，如 my-api-skill）</label>
+            <input type="text" id="inp-skill-name" placeholder="my-web-skill" />
+          </div>
+          <div>
+            <label>Skill 显示名称</label>
+            <input type="text" id="inp-skill-display" placeholder="我的 Web Skill" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:14px">
+          <label>Skill 描述</label>
+          <textarea id="inp-skill-desc" style="min-height:56px" placeholder="该 Skill 的功能说明..."></textarea>
+        </div>
+      </div>
+
+      <div style="margin-top:18px">
+        <button class="btn btn-primary" id="btn-generate" onclick="doGenerate()">
+          <span>⚡</span> 生成代码
+        </button>
+      </div>
+      <div id="gen-loading" style="display:none">
+        <div class="loading-wrap"><div class="spinner"></div>正在生成代理代码...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Step 4 ══ -->
+  <div class="step-card" id="step4">
+    <div class="step-header" onclick="toggleStep('step4')">
+      <div class="step-badge">4</div>
+      <span class="step-title">代码预览与发布</span>
+      <span class="step-arrow">▼</span>
+    </div>
+    <div class="step-body">
+      <div class="tabs" id="code-tabs"></div>
+      <div class="code-preview" id="code-preview-content">
+        <pre>// 生成代码后在此预览...</pre>
+      </div>
+
+      <div class="skill-config" style="margin-top:20px">
+        <div class="skill-config-title">📦 发布配置</div>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="inp-export-zip" />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label">导出为 ZIP 文件</span>
+        </div>
+        <div class="toggle-row" style="margin-top:12px">
+          <label class="toggle">
+            <input type="checkbox" id="inp-register" checked />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label">注册到 Genvis 平台</span>
+        </div>
+      </div>
+
+      <div style="margin-top:18px">
+        <button class="btn btn-success" id="btn-publish" onclick="doPublish()">
+          <span>🚀</span> 发布到平台
+        </button>
+      </div>
+      <div id="publish-loading" style="display:none">
+        <div class="loading-wrap"><div class="spinner"></div>正在打包并注册 Skill...</div>
+      </div>
+      <div id="publish-result" style="display:none"></div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<div id="toast-container"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+//  State
+// ══════════════════════════════════════════════════════════
+let capturedApis = [];
+let analyzedApis = [];
+let generatedFiles = {};
+
+// ══════════════════════════════════════════════════════════
+//  Step 折叠
+// ══════════════════════════════════════════════════════════
+function toggleStep(id) {
+  const card = document.getElementById(id);
+  card.classList.toggle('open');
+}
+function openStep(id) {
+  const card = document.getElementById(id);
+  card.classList.add('open', 'active');
+}
+function markDone(id) {
+  document.getElementById(id).classList.add('done');
+}
+
+// ══════════════════════════════════════════════════════════
+//  Toast
+// ══════════════════════════════════════════════════════════
+function showToast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ══════════════════════════════════════════════════════════
+//  Step 1: Analyze
+// ══════════════════════════════════════════════════════════
+async function doAnalyze() {
+  const url = document.getElementById('inp-url').value.trim();
+  if (!url) { showToast('请输入目标 URL', 'error'); return; }
+
+  const btn = document.getElementById('btn-analyze');
+  const loading = document.getElementById('analyze-loading');
+  btn.disabled = true;
+  loading.style.display = 'block';
+
+  try {
+    const cookies = document.getElementById('inp-cookies').value.trim() || null;
+    const wait_seconds = parseInt(document.getElementById('inp-wait').value);
+    const auto_scroll = document.getElementById('inp-scroll').checked;
+    const capture_screenshot = document.getElementById('captureScreenshot').checked;
+    const detect_elements = document.getElementById('detectElements').checked;
+
+    const res = await fetch('/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, cookies, wait_seconds, auto_scroll, capture_screenshot, detect_elements })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || '分析失败');
+
+    const data = json.data;
+    // 兼容旧格式（data 直接是数组）和新格式（data 是对象含 apis 字段）
+    if (Array.isArray(data)) {
+      capturedApis = data;
+      window._pageElements = [];
+      window._screenshot = null;
+      window._pageTitle = '';
+      window._pageDescription = '';
+    } else {
+      capturedApis = data.apis || [];
+      window._pageElements = data.page_elements || [];
+      window._screenshot = data.screenshot || null;
+      window._pageTitle = data.page_title || '';
+      window._pageDescription = data.page_description || '';
+    }
+
+    renderScreenshot(window._screenshot, window._pageTitle, window._pageDescription);
+    renderPageElements(window._pageElements);
+    renderApiTable(capturedApis);
+    markDone('step1');
+    openStep('step2');
+    showToast(`✅ 捕获到 ${capturedApis.length} 个 API`, 'success');
+  } catch (e) {
+    showToast('❌ ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    loading.style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  Step 2: API Table
+// ══════════════════════════════════════════════════════════
+function renderApiTable(apis) {
+  const tbody = document.getElementById('api-tbody');
+  tbody.innerHTML = '';
+  apis.forEach((api, i) => {
+    const tr = document.createElement('tr');
+    const ct = api.content_type.split(';')[0].trim();
+    tr.innerHTML = `
+      <td><input type="checkbox" checked data-idx="${i}" onchange="updateSelCount()" /></td>
+      <td><span class="method-badge method-${api.method}">${api.method}</span></td>
+      <td style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;font-size:12px" title="${escHtml(api.url)}">${escHtml(api.path)}</td>
+      <td>${api.response_status}</td>
+      <td style="font-size:12px;color:#6c7086">${escHtml(ct)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  updateSelCount();
+}
+
+function selectAll(val) {
+  document.querySelectorAll('#api-tbody input[type="checkbox"]').forEach(cb => { cb.checked = val; });
+  updateSelCount();
+}
+
+function updateSelCount() {
+  const all = document.querySelectorAll('#api-tbody input[type="checkbox"]');
+  const sel = [...all].filter(c => c.checked).length;
+  document.getElementById('total-count').textContent = all.length;
+  document.getElementById('sel-count').textContent = sel;
+}
+
+function getSelectedApis() {
+  const checkboxes = document.querySelectorAll('#api-tbody input[type="checkbox"]');
+  return [...checkboxes]
+    .map((cb, i) => ({ checked: cb.checked, api: capturedApis[i] }))
+    .filter(x => x.checked)
+    .map(x => x.api);
+}
+
+// ══════════════════════════════════════════════════════════
+//  Step 2→3: AI Analyze
+// ══════════════════════════════════════════════════════════
+async function doAiAnalyze() {
+  const selected = getSelectedApis();
+  if (!selected.length) { showToast('请至少选择一个 API', 'error'); return; }
+
+  const btn = document.getElementById('btn-ai');
+  const loading = document.getElementById('ai-loading');
+  btn.disabled = true;
+  loading.style.display = 'block';
+
+  try {
+    const skill_name = document.getElementById('inp-skill-name').value.trim() || null;
+    const res = await fetch('/analyze/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apis: selected,
+        skill_name,
+        page_elements: window._pageElements || [],
+        screenshot_base64: window._screenshot ? window._screenshot.viewport : null,
+        page_title: window._pageTitle || '',
+        page_description: window._pageDescription || ''
+      })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'AI 分析失败');
+
+    analyzedApis = json.data;
+    renderAnalyzedList(analyzedApis);
+    markDone('step2');
+    openStep('step3');
+    showToast(`✅ AI 分析完成，共 ${analyzedApis.length} 个接口`, 'success');
+  } catch (e) {
+    showToast('❌ ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    loading.style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  Step 3: Render Analyzed
+// ══════════════════════════════════════════════════════════
+function renderAnalyzedList(apis) {
+  const container = document.getElementById('analyzed-list');
+  container.innerHTML = '';
+  apis.forEach((api, i) => {
+    const paramsHtml = api.parameters.length
+      ? `<table class="params-table">
+          <thead><tr><th>名称</th><th>类型</th><th>必填</th><th>位置</th><th>描述</th></tr></thead>
+          <tbody>${api.parameters.map(p => `
+            <tr>
+              <td style="font-family:monospace">${escHtml(p.name)}</td>
+              <td style="color:#cba6f7">${escHtml(p.type)}</td>
+              <td>${p.required ? '✓' : '-'}</td>
+              <td><span class="loc-badge">${escHtml(p.location)}</span></td>
+              <td>${escHtml(p.description)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`
+      : '<span style="color:#6c7086;font-size:12px">无参数</span>';
+
+    const sourceBadge = api.original_url
+      ? '<span class="source-badge captured">🌐 网络捕获</span>'
+      : '<span class="source-badge visual">👁 视觉识别</span>';
+
+    const card = document.createElement('div');
+    card.className = 'analyzed-card';
+    card.innerHTML = `
+      <div class="analyzed-card-title">
+        <span class="method-badge method-${api.method}">${api.method}</span>
+        <span style="font-family:monospace;font-size:12px;color:#89b4fa">${escHtml(api.path)}</span>
+        <span class="category-badge">${escHtml(api.category)}</span>
+        ${sourceBadge}
+      </div>
+      <div class="grid-2">
+        <div>
+          <label>函数名</label>
+          <input type="text" value="${escHtml(api.function_name)}" oninput="analyzedApis[${i}].function_name=this.value" />
+        </div>
+        <div>
+          <label>显示名称</label>
+          <input type="text" value="${escHtml(api.display_name)}" oninput="analyzedApis[${i}].display_name=this.value" />
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:10px">
+        <label>描述</label>
+        <textarea style="min-height:48px" oninput="analyzedApis[${i}].description=this.value">${escHtml(api.description)}</textarea>
+      </div>
+      <div style="margin-top:10px">
+        <label>参数列表</label>
+        ${paramsHtml}
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+//  Step 3→4: Generate
+// ══════════════════════════════════════════════════════════
+async function doGenerate() {
+  const skill_name = document.getElementById('inp-skill-name').value.trim();
+  if (!skill_name) { showToast('请填写 Skill 名称', 'error'); return; }
+  if (!analyzedApis.length) { showToast('请先完成 AI 分析', 'error'); return; }
+
+  const btn = document.getElementById('btn-generate');
+  const loading = document.getElementById('gen-loading');
+  btn.disabled = true;
+  loading.style.display = 'block';
+
+  try {
+    const base_url = document.getElementById('inp-url').value.trim();
+    const skill_display_name = document.getElementById('inp-skill-display').value.trim() || skill_name;
+    const skill_description = document.getElementById('inp-skill-desc').value.trim();
+
+    const res = await fetch('/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apis: analyzedApis,
+        skill_name,
+        skill_display_name,
+        skill_description,
+        base_url
+      })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || '代码生成失败');
+
+    generatedFiles = json.data.files;
+    renderCodeTabs(generatedFiles);
+    markDone('step3');
+    openStep('step4');
+    showToast('✅ 代码生成成功', 'success');
+  } catch (e) {
+    showToast('❌ ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    loading.style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  Step 4: Code Tabs
+// ══════════════════════════════════════════════════════════
+let activeTab = null;
+function renderCodeTabs(files) {
+  const tabsEl = document.getElementById('code-tabs');
+  tabsEl.innerHTML = '';
+  const fileNames = Object.keys(files);
+  fileNames.forEach((name, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
+    btn.textContent = name;
+    btn.onclick = () => switchTab(name, fileNames);
+    tabsEl.appendChild(btn);
+  });
+  if (fileNames.length) switchTab(fileNames[0], fileNames);
+}
+
+function switchTab(name, fileNames) {
+  activeTab = name;
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', b.textContent === name);
+  });
+  const pre = document.querySelector('#code-preview-content pre');
+  if (pre) pre.textContent = generatedFiles[name] || '';
+}
+
+// ══════════════════════════════════════════════════════════
+//  Step 4: Publish
+// ══════════════════════════════════════════════════════════
+async function doPublish() {
+  const skill_name = document.getElementById('inp-skill-name').value.trim();
+  if (!skill_name) { showToast('请填写 Skill 名称', 'error'); return; }
+
+  const btn = document.getElementById('btn-publish');
+  const loading = document.getElementById('publish-loading');
+  const resultEl = document.getElementById('publish-result');
+  btn.disabled = true;
+  loading.style.display = 'block';
+  resultEl.style.display = 'none';
+
+  try {
+    const export_zip = document.getElementById('inp-export-zip').checked;
+    const register_to_platform = document.getElementById('inp-register').checked;
+
+    const res = await fetch('/package', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skill_name, export_zip, register_to_platform })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || '发布失败');
+
+    const info = json.data;
+    resultEl.innerHTML = `
+      <div class="publish-result">
+        <div class="title">🎉 Skill 发布成功！</div>
+        <div class="info-row"><span>Skill 名称：</span><span class="info-val">${escHtml(info.skill_name)}</span></div>
+        <div class="info-row"><span>输出路径：</span><span class="info-val">${escHtml(info.output_path)}</span></div>
+        <div class="info-row"><span>API 数量：</span><span class="info-val">${info.api_count}</span></div>
+        <div class="info-row"><span>包含文件：</span><span class="info-val">${info.files.join(', ')}</span></div>
+        ${info.zip_path ? `<div class="info-row"><span>ZIP 路径：</span><span class="info-val">${escHtml(info.zip_path)}</span></div>` : ''}
+      </div>
+    `;
+    resultEl.style.display = 'block';
+    markDone('step4');
+    showToast('🚀 Skill 已成功发布到平台！', 'success');
+  } catch (e) {
+    showToast('❌ ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    loading.style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  Visual Analysis Renderers
+// ══════════════════════════════════════════════════════════
+function renderScreenshot(screenshot, title, description) {
+  const section = document.getElementById('screenshot-section');
+  if (!screenshot || (!screenshot.viewport && !screenshot.full_page)) {
+    section.style.display = 'none';
+    return;
+  }
+  const imgSrc = screenshot.viewport || screenshot.full_page || screenshot;
+  const img = document.getElementById('screenshot-img');
+  // 支持 base64 字符串（带或不带前缀）
+  if (typeof imgSrc === 'string') {
+    img.src = imgSrc.startsWith('data:') ? imgSrc : 'data:image/png;base64,' + imgSrc;
+  }
+  const meta = document.getElementById('screenshot-meta');
+  let metaHtml = '';
+  if (title) metaHtml += `<strong>${escHtml(title)}</strong>`;
+  if (description) metaHtml += (title ? ' — ' : '') + escHtml(description);
+  meta.innerHTML = metaHtml;
+  meta.style.display = metaHtml ? 'block' : 'none';
+  section.style.display = 'block';
+}
+
+function renderPageElements(elements) {
+  const section = document.getElementById('elements-section');
+  if (!elements || elements.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  document.getElementById('elements-title').textContent = `🔍 检测到的页面元素（共 ${elements.length} 个）`;
+  const container = document.getElementById('element-tags-container');
+  container.innerHTML = '';
+  elements.forEach(el => {
+    const tag = document.createElement('span');
+    const elType = (el.element_type || el.tag || 'other').toLowerCase();
+    let cls = 'other';
+    if (/button|submit|btn/.test(elType)) cls = 'button';
+    else if (/input|textarea|select|form/.test(elType)) cls = 'input';
+    else if (/a|link/.test(elType)) cls = 'link';
+    tag.className = `element-tag ${cls}`;
+    const icon = cls === 'button' ? '🔘' : cls === 'input' ? '✏️' : cls === 'link' ? '🔗' : '⬜';
+    const text = el.text || el.label || el.name || el.id || elType;
+    const display = text.length > 30 ? text.slice(0, 30) + '…' : text;
+    tag.textContent = icon + ' ' + display;
+    tag.title = text + (el.element_type ? ` [${el.element_type}]` : '');
+    container.appendChild(tag);
+  });
+  section.style.display = 'block';
+}
+
+function toggleCollapsible(headerId, bodyId) {
+  const header = document.getElementById(headerId);
+  const body = document.getElementById(bodyId);
+  const isOpen = body.classList.contains('open');
+  if (isOpen) {
+    body.classList.remove('open');
+    header.classList.remove('open');
+  } else {
+    body.classList.add('open');
+    header.classList.add('open');
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  Utils
+// ══════════════════════════════════════════════════════════
+function escHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>

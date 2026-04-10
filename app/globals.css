@@ -169,6 +169,13 @@
     border: 1px solid rgba(255, 255, 255, 0.2);
     transition: background 0.2s ease;
   }
+  /* Disable hover background transition on large layout glass-cards (scroll containers) */
+  .glass-card.no-hover-transition {
+    transition: none;
+  }
+  .glass-card.no-hover-transition:hover {
+    background: inherit;
+  }
   /* 亮色模式下 .glass-card 内的所有 slate 颜色强制为深色 */
   :root:not(.dark):not(.spring) .glass-card :is(
     .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400,

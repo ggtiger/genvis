@@ -3230,7 +3230,7 @@ const persistProjectPreferences = useCallback(
       <AnimatedBackground bgUrl={bgUrl} bgCss={bgCss} />
       <div className="glass flex h-full w-full rounded-none shadow-2xl overflow-hidden relative">
 
-        <div className="h-[calc(100%-16px)] flex-1 flex min-w-0 overflow-hidden relative glass-card m-2 rounded-2xl">
+        <div className="h-[calc(100%-16px)] flex-1 flex min-w-0 overflow-hidden relative glass-card no-hover-transition m-2 rounded-2xl">
           {/* Mobile view toggle - fixed at top, always visible */}
           {isMobileDevice && (
             <div className="absolute top-0 left-0 right-0 z-50 bg-white/30 dark:bg-slate-900/30 bg-white/60 dark:bg-slate-900/60 border-b border-white/10 px-4 py-2 flex items-center justify-center gap-1">
@@ -3269,7 +3269,7 @@ const persistProjectPreferences = useCallback(
               overflow: previewMode === 'fullscreen' ? 'hidden' : undefined,
               paddingTop: isMobileDevice ? '52px' : undefined
             }}
-            className="h-full border-r border-white/15 dark:border-white/[0.06] flex flex-col min-w-0 flex-shrink-0 overflow-hidden transition-all duration-300 chat-panel-responsive"
+            className="h-full border-r border-white/15 dark:border-white/[0.06] flex flex-col min-w-0 flex-shrink-0 overflow-hidden transition-[width] duration-300 ease-out chat-panel-responsive"
           >
             {currentView === 'chat' && (
               <>
@@ -3653,7 +3653,7 @@ const persistProjectPreferences = useCallback(
           {/* Right: Preview/Code area - Only show in chat view */}
           {currentView === 'chat' && (
             <div
-              className="h-full flex flex-col min-w-0 flex-shrink-0 overflow-hidden transition-all duration-300 preview-panel-responsive"
+              className="h-full flex flex-col min-w-0 flex-shrink-0 overflow-hidden transition-[width] duration-300 ease-out preview-panel-responsive"
               style={{
                 width: isMobileDevice
                   ? (mobileViewMode === 'preview' ? '100%' : '0')

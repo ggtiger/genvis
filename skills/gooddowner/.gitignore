@@ -59,3 +59,7 @@ tmp/
 .pytest_cache/
 .coverage
 htmlcov/
+
+*.pyc
+*.pyo
+*.pyd

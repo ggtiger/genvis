@@ -1,0 +1,9 @@
+{
+  "displayName": "Web API 抓取器",
+  "description": "自动分析网页功能，抓取并封装HTTP API为独立Skill",
+  "category": "开发工具",
+  "tags": ["API", "自动化", "Playwright", "逆向"],
+  "version": "1.0.0",
+  "author": "Genvis",
+  "projectType": "python-fastapi"
+}
